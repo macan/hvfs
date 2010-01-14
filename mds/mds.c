@@ -252,6 +252,7 @@ int mds_init(int bdepth)
     /* prepare the hmi & hmo */
     memset(&hmi, 0, sizeof(hmi));
     memset(&hmo, 0, sizeof(hmo));
+    INIT_LIST_HEAD(&hmo.async_unlink);
 #ifdef HVFS_DEBUG_LOCK
     lock_table_init();
 #endif
@@ -263,6 +264,8 @@ int mds_init(int bdepth)
     hmo.conf.profiling_thread_interval = 5;
     hmo.conf.txg_interval = 0;
     hmo.conf.option = HVFS_MDS_ITB_RWLOCK;
+    hmo.conf.max_async_unlink = 100;
+    hmo.conf.unlink_interval = 1;
 
     /* Init the signal handlers */
     err = mds_init_signal();

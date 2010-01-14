@@ -125,7 +125,7 @@ int mds_dh_remove(struct dh *dh, u64 uuid)
     hlist_for_each_entry_safe(e, pos, n, &rh->h, hlist) {
         if (e->uuid == uuid) {
             hlist_del(&e->hlist);
-            hvfs_debug(mds, "Remove dir:%8ld in DH w/  %p\n", uuid, e);
+            hvfs_debug(mds, "Remove dir:%8lld in DH w/  %p\n", uuid, e);
             xfree(e);
         }
     }
@@ -174,9 +174,9 @@ struct dhe *mds_dh_load(struct dh *dh, u64 duuid)
 
     e = mds_dh_search(dh, hmi.gdt_uuid);
     if (IS_ERR(e)) {
-        hvfs_err(mds, "Hoo, we can NOT find the GDT uuid %ld(%ld).\n",
+        hvfs_err(mds, "Hoo, we can NOT find the GDT uuid %lld(%lld).\n",
                  hmi.gdt_uuid, duuid);
-        hvfs_err(mds, "This is a fatal error %ld! We must die.\n", 
+        hvfs_err(mds, "This is a fatal error %lld! We must die.\n", 
                  PTR_ERR(e));
         ASSERT(0, mds);
     }
@@ -185,7 +185,7 @@ struct dhe *mds_dh_load(struct dh *dh, u64 duuid)
     /* find the MDS server */
     p = ring_get_point(thi.itbid, hmi.gdt_salt, hmo.chring[CH_RING_MDS]);
     if (IS_ERR(p)) {
-        hvfs_err(mds, "ring_get_point(%ld) failed with %ld\n", 
+        hvfs_err(mds, "ring_get_point(%lld) failed with %lld\n", 
                  thi.itbid, PTR_ERR(p));
         e = ERR_PTR(-ECHP);
         goto out_free;
@@ -219,7 +219,7 @@ send_msg:
     /* key, we got the mdu, let us insert it to the dh table */
     e = mds_dh_insert(dh, rhi);
     if (IS_ERR(e)) {
-        hvfs_err(mds, "mds_dh_insert() failed %ld\n", PTR_ERR(e));
+        hvfs_err(mds, "mds_dh_insert() failed %lld\n", PTR_ERR(e));
         goto out_free;
     }
     
@@ -262,7 +262,7 @@ struct dhe *mds_dh_search(struct dh *dh, u64 duuid)
          * directory information from the GDT server */
         e = mds_dh_load(dh, duuid);
         if (IS_ERR(e)) {
-            hvfs_err(mds, "Hoo, loading DH %ld failed\n", duuid);
+            hvfs_err(mds, "Hoo, loading DH %lld failed\n", duuid);
             goto out;
         }
     }
@@ -304,7 +304,7 @@ retry:
                 offset = mds_bitmap_fallback(offset);
             } else if (err) {
                 /* some error occurs, we failed to the 0 position */
-                hvfs_err(mds, "Hoo, loading DHE %ld Bitmap %ld failed\n", 
+                hvfs_err(mds, "Hoo, loading DHE %lld Bitmap %lld failed\n", 
                          e->uuid, offset);
                 goto out;
             }
@@ -326,7 +326,7 @@ retry:
     if (err == -ENOTEXIST) {
         offset = mds_bitmap_fallback(offset);
     } else if (err) {
-        hvfs_err(mds, "Hoo, loading DHE %ld Bitmap %ld failed\n", 
+        hvfs_err(mds, "Hoo, loading DHE %lld Bitmap %lld failed\n", 
                  e->uuid, offset);
         goto out;
     }

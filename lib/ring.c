@@ -188,7 +188,7 @@ void ring_dump(struct chring *r)
     hvfs_info(lib, "Ring %d with %d(%d) entries:\n", r->group, 
               r->used, r->alloc);
     for (i = 0; i < r->used; i++) {
-        hvfs_info(lib, "%16d: %50ld\n", i, r->array[i].point);
+        hvfs_info(lib, "%16d: %50lld\n", i, r->array[i].point);
     }
 }
 

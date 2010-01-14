@@ -77,6 +77,7 @@ struct itbh
     void *be;                   /* bucket_entry myself attatched to */
     struct hlist_node cbht;
     struct list_head list;      /* link into the lru list/dirty list */
+    struct list_head unlink;    /* link into the unlink list */
 
     u64 twin;                   /* twin ITB */
     struct list_head overflow;  /* overflow list */

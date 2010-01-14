@@ -34,28 +34,28 @@
 
 static void __dconf_cmd_action(struct dconf_req *dcr, int fd)
 {
-    hvfs_verbose(mds, "ACTION on CMD %ld %ld...\n", dcr->cmd, dcr->arg0);
+    hvfs_verbose(mds, "ACTION on CMD %lld %lld...\n", dcr->cmd, dcr->arg0);
     switch (dcr->cmd) {
     case DCONF_ECHO_CONF:
         /* reply the configuration */
         break;
     case DCONF_SET_TXG_INTV:
         if (dcr->arg0 >= 0) {
-            hvfs_info(mds, "Changing TXG  Interval to %ld\n", dcr->arg0);
+            hvfs_info(mds, "Changing TXG  Interval to %lld\n", dcr->arg0);
             hmo.conf.txg_interval = dcr->arg0;
         }
         mds_reset_itimer();
         break;
     case DCONF_SET_PROF_INTV:
         if (dcr->arg0 >= 0) {
-            hvfs_info(mds, "Changing Prof Interval to %ld\n", dcr->arg0);
+            hvfs_info(mds, "Changing Prof Interval to %lld\n", dcr->arg0);
             hmo.conf.profiling_thread_interval = dcr->arg0;
         }
         mds_reset_itimer();
         break;
     case DCONF_SET_UNLINK_INTV:
         if (dcr->arg0 >= 0) {
-            hvfs_info(mds, "Changing UNLK Interval to %ld\n", dcr->arg0);
+            hvfs_info(mds, "Changing UNLK Interval to %lld\n", dcr->arg0);
             hmo.conf.unlink_interval = dcr->arg0;
         }
         mds_reset_itimer();

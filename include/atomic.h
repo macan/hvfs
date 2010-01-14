@@ -76,7 +76,7 @@ static inline void atomic_sub(int i, atomic_t *v)
  */
 static inline void atomic64_add(long i, atomic64_t *v)
 {
-    asm volatile(LOCK_PREFIX "addq %1,%0"
+    asm volatile(LOCK_PREFIX "addl %1,%0"
                  : "=m" (v->counter)
                  : "er" (i), "m" (v->counter));
 }
@@ -114,7 +114,7 @@ static inline int atomic_sub_return(int i, atomic_t *v)
  */
 static inline void atomic64_sub(long i, atomic64_t *v)
 {
-    asm volatile(LOCK_PREFIX "subq %1,%0"
+    asm volatile(LOCK_PREFIX "subl %1,%0"
                  : "=m" (v->counter)
                  : "er" (i), "m" (v->counter));
 }
@@ -129,7 +129,7 @@ static inline void atomic64_sub(long i, atomic64_t *v)
 static inline long atomic64_add_return(long i, atomic64_t *v)
 {
     long __i = i;
-    asm volatile(LOCK_PREFIX "xaddq %0, %1;"
+    asm volatile(LOCK_PREFIX "xaddl %0, %1;"
                  : "+r" (i), "+m" (v->counter)
                  : : "memory");
     return i + __i;
@@ -170,12 +170,6 @@ static inline unsigned long __cmpxchg(volatile void *ptr, unsigned long old,
         return prev;
     case 4:
         asm volatile(LOCK_PREFIX "cmpxchgl %k1,%2"
-                     : "=a"(prev)
-                     : "r"(new), "m"(*__xg(ptr)), "0"(old)
-                     : "memory");
-        return prev;
-    case 8:
-        asm volatile(LOCK_PREFIX "cmpxchgq %1,%2"
                      : "=a"(prev)
                      : "r"(new), "m"(*__xg(ptr)), "0"(old)
                      : "memory");

@@ -131,7 +131,7 @@ inline int __cbht segment_update_dir(struct eh *eh, u64 len, struct bucket *b)
         for (i = 0; i < s->len; i++) {
             if (((s->offset + i) & mask) == (b->id & mask)) {
                 *(((struct bucket **)s->seg) + i) = b;
-                hvfs_debug(mds, "D #%d Update @ %d w/ %p %ld\n", 
+                hvfs_debug(mds, "D #%d Update @ %d w/ %p %lld\n", 
                            eh->dir_depth, i, b, b->id);
             }
             if (!(--len))
@@ -168,7 +168,7 @@ void __cbht cbht_copy_dir(struct segment *s, u64 offset, u64 len, struct eh *eh)
     list_for_each_entry(pos, &eh->dir, list) {
         if (pos->offset <= offset && offset < (pos->offset + pos->len)) {
             clen = min(len, (pos->offset + pos->len - offset));
-            hvfs_debug(mds, "copy to [%ld,%ld) from [%ld,%ld), clen %ld\n",
+            hvfs_debug(mds, "copy to [%lld,%lld) from [%lld,%lld), clen %lld\n",
                        s->offset + s->len, s->offset + s->len + clen,
                        offset, offset + len, clen);
             memcpy(((struct bucket **)s->seg) + s->len + cplen, 
@@ -332,7 +332,7 @@ retry:
         hlist_for_each_entry_safe(ih, pos, n, &(obe + i)->h, cbht) {
             if ((ih->hash >> eh->bucket_depth) & 
                 (1 << (atomic_read(&nb->depth) - 1))) {
-                hvfs_debug(mds, "hash 0x%lx from ob[%ld] to nb[%ld]\n", 
+                hvfs_debug(mds, "hash 0x%llx from ob[%lld] to nb[%lld]\n", 
                            ih->hash, ob->id, nb->id);
                 /* move the new ITB */
                 hlist_del_init(pos);
@@ -362,7 +362,7 @@ retry:
         goto out_lock;
     }
 
-    hvfs_debug(mds, "%lx, in %d: ob[%ld] %d nb[%ld] %d. eh->depth %d\n", 
+    hvfs_debug(mds, "%llx, in %d: ob[%lld] %d nb[%lld] %d. eh->depth %d\n", 
                criminal, in, ob->id, atomic_read(&ob->active), 
                nb->id, atomic_read(&nb->active), eh->dir_depth);
 
@@ -487,7 +487,7 @@ int __cbht mds_cbht_insert_bbrlocked(struct eh *eh, struct itb *i,
 retry:
     b = mds_cbht_search_dir(hash, &sdepth);
     if (unlikely(IS_ERR(b))) {
-        hvfs_err(mds, "No buckets exist? Find 0x%lx in the EH dir, "
+        hvfs_err(mds, "No buckets exist? Find 0x%llx in the EH dir, "
                  "internal error!\n", i->h.itbid);
         return -ENOENT;
     }
@@ -505,7 +505,7 @@ retry:
             goto out;
     }
 
-    hvfs_debug(mds, "%lx, ITB %ld, %ld trying to insert to b[%ld]\n", 
+    hvfs_debug(mds, "%llx, ITB %lld, %lld trying to insert to b[%lld]\n", 
                hash, i->h.puuid, i->h.itbid, b->id);
     xrwlock_wlock(&be->lock);
     /* ok, we should check whether this ITB is existing */
@@ -565,7 +565,7 @@ int __cbht mds_cbht_insert(struct eh *eh, struct itb *i)
 retry:
     b = mds_cbht_search_dir(hash, &sdepth);
     if (unlikely(IS_ERR(b))) {
-        hvfs_err(mds, "No buckets exist? Find 0x%lx in the EH dir, "
+        hvfs_err(mds, "No buckets exist? Find 0x%llx in the EH dir, "
                  "internal error!\n", i->h.itbid);
         return -ENOENT;
     }
@@ -611,7 +611,7 @@ int __cbht mds_cbht_del(struct eh *eh, struct itb *i)
 
     b = mds_cbht_search_dir(i->h.hash, &sdepth);
     if (unlikely(IS_ERR(b))) {
-        hvfs_err(mds, "No buckets exist? Find 0x%lx in the EH dir, "
+        hvfs_err(mds, "No buckets exist? Find 0x%llx in the EH dir, "
                  "internal error!\n", i->h.itbid);
         return -ENOENT;
     }
@@ -667,7 +667,7 @@ retry:
         offset -= s->offset;
         if (s->seg) {
             b = *(((struct bucket **)s->seg) + offset);
-            hvfs_verbose(mds, "hash 0x%lx, offset %ld, b[%ld]\n",
+            hvfs_verbose(mds, "hash 0x%llx, offset %lld, b[%lld]\n",
                          hash, offset, b->id);
             /* ok, holding the bucket rlock */
             err = xrwlock_tryrlock(&b->lock);
@@ -716,7 +716,7 @@ int __cbht cbht_itb_hit(struct itb *i, struct hvfs_index *hi,
     err = itb_search(hi, i, mdu_rpy, txg, &oi, otxg);
     if (unlikely(err)) {
         hvfs_debug(mds, "Oh, itb_search() return %d."
-                   "(itb [%ld, %ld], hi [%ld, %ld, %s]), itb %p\n", 
+                   "(itb [%lld, %lld], hi [%lld, %lld, %s]), itb %p\n", 
                    err, i->h.puuid, i->h.itbid, hi->puuid, hi->itbid, hi->name, i);
         goto out;
     }
@@ -862,7 +862,7 @@ int __cbht mds_cbht_search(struct hvfs_index *hi, struct hvfs_md_reply *hmr,
 retry_dir:
     b = mds_cbht_search_dir(hash, &sdepth);
     if (unlikely(IS_ERR(b))) {
-        hvfs_err(mds, "No buckets exist? Find 0x%lx in the EH dir, "
+        hvfs_err(mds, "No buckets exist? Find 0x%llx in the EH dir, "
                  "internal error!\n", hi->itbid);
         return -ENOENT;
     }
@@ -911,7 +911,7 @@ retry:
 
     /* Can not find it in CBHT, holding the bucket.rlock */
     /* Step1: release the bucket.rlock */
-    hvfs_verbose(mds, "hash 0x%lx bucket %p but can not find the ITB in it.\n",
+    hvfs_verbose(mds, "hash 0x%llx bucket %p but can not find the ITB in it.\n",
                  hash, b);
     xrwlock_runlock(&b->lock);
     err = cbht_itb_miss(hi, hmr, txg, otxg);
@@ -945,7 +945,7 @@ void mds_cbht_search_dump_itb(struct hvfs_index *hi)
 
     b = mds_cbht_search_dir(hash, &sdepth);
     if (unlikely(IS_ERR(b))) {
-        hvfs_err(mds, "No buckets exist? Find 0x%lx in the EH dir, "
+        hvfs_err(mds, "No buckets exist? Find 0x%llx in the EH dir, "
                  "internal error!\n", hi->itbid);
         return;
     }
@@ -964,7 +964,7 @@ void mds_cbht_search_dump_itb(struct hvfs_index *hi)
     }
 
     offset = hi->hash & ((1 << ITB_DEPTH) - 1);
-    hvfs_info(mds, "criminal: %s @ offset %ld\n", hi->name, offset);
+    hvfs_info(mds, "criminal: %s @ offset %lld\n", hi->name, offset);
 
     /* always holding the bucket.rlock */
     xrwlock_rlock(&be->lock);

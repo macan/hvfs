@@ -48,8 +48,8 @@
 #include <fcntl.h>
 #include <ctype.h>
 
-typedef unsigned long u64;
-typedef signed long s64;
+typedef unsigned long long u64;
+typedef signed long long s64;
 
 typedef unsigned int u32;
 typedef signed int s32;
@@ -72,7 +72,7 @@ typedef signed char s8;
 /*  2^63 + 2^61 - 2^57 + 2^54 - 2^51 - 2^18 + 1 */
 #define GOLDEN_RATIO_PRIME_64 0x9e37fffffffc0001UL
 
-#define GOLDEN_RATIO_PRIME GOLDEN_RATIO_PRIME_64
+#define GOLDEN_RATIO_PRIME GOLDEN_RATIO_PRIME_32
 
 static inline u64 hash_64(u64 val, unsigned int bits)
 {

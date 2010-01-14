@@ -92,45 +92,6 @@ int lib_bitmap_tach(volatile void *addr, u32 offset)
 }
 
 
-static inline long
-__find_first_zero_bit(const unsigned long * addr, unsigned long size)
-{
-    long d0, d1, d2;
-    long res;
-
-    /*
-     * We must test the size in words, not in bits, because
-     * otherwise incoming sizes in the range -63..-1 will not run
-     * any scasq instructions, and then the flags used by the je
-     * instruction will have whatever random value was in place
-     * before.  Nobody should call us like that, but
-     * find_next_zero_bit() does when offset and size are at the
-     * same word and it fails to find a zero itself.
-     */
-    size += 63;
-    size >>= 6;
-    if (!size)
-        return 0;
-    asm volatile(
-        "  repe; scasq\n"
-        "  je 1f\n"
-        "  xorq -8(%%rdi),%%rax\n"
-        "  subq $8,%%rdi\n"
-        "  bsfq %%rax,%%rdx\n"
-        "1:  subq %[addr],%%rdi\n"
-        "  shlq $3,%%rdi\n"
-        "  addq %%rdi,%%rdx"
-        :"=d" (res), "=&c" (d0), "=&D" (d1), "=&a" (d2)
-        :"0" (0ULL), "1" (size), "2" (addr), "3" (-1ULL),
-         [addr] "S" (addr) : "memory");
-    /*
-     * Any register would do for [addr] above, but GCC tends to
-     * prefer rbx over rsi, even though rsi is readily available
-     * and doesn't have to be saved.
-     */
-    return res;
-}
-
 /**
  * find_first_zero_bit - find the first zero bit in a memory region
  * @addr: The address to start the search at
@@ -141,7 +102,28 @@ __find_first_zero_bit(const unsigned long * addr, unsigned long size)
  */
 long find_first_zero_bit(const unsigned long * addr, unsigned long size)
 {
-    return __find_first_zero_bit (addr, size);
+    int d0, d1, d2;
+    int res;
+
+    if (!size)
+        return 0;
+
+        /* This looks at memory. Mark it volatile to tell gcc not to move it around */
+    __asm__ __volatile__(
+        "movl $-1,%%eax\n\t"
+        "xorl %%edx,%%edx\n\t"
+        "repe; scasl\n\t"
+        "je 1f\n\t"
+        "xorl -4(%%edi),%%eax\n\t"
+        "subl $4,%%edi\n\t"
+        "bsfl %%eax,%%edx\n"
+        "1:\tsubl %%ebx,%%edi\n\t"
+        "shll $3,%%edi\n\t"
+        "addl %%edi,%%edx"
+        :"=d" (res), "=&c" (d0), "=&D" (d1), "=&a" (d2)
+        :"1" ((size + 31) >> 5), "2" (addr), "b" (addr) : "memory");
+
+    return res;
 }
 
 /**
@@ -152,62 +134,40 @@ long find_first_zero_bit(const unsigned long * addr, unsigned long size)
  */
 long find_next_zero_bit (const unsigned long * addr, long size, long offset)
 {
-    const unsigned long * p = addr + (offset >> 6);
-    unsigned long set = 0;
-    unsigned long res, bit = offset&63;
-    
+    unsigned long * p = ((unsigned long *) addr) + (offset >> 5);
+    int set = 0, bit = offset & 31, res;
+
     if (bit) {
         /*
-         * Look for zero in first word
+         * Look for zero in the first 32 bits.
          */
-        asm("bsfq %1,%0\n\t"
-            "cmoveq %2,%0"
-            : "=r" (set)
-            : "r" (~(*p >> bit)), "r"(64L));
-        if (set < (64 - bit))
+        __asm__("bsfl %1,%0\n\t"
+                "jne 1f\n\t"
+                "movl $32, %0\n"
+                "1:"
+                : "=r" (set)
+                : "r" (~(*p >> bit)));
+
+        if (set < (32 - bit))
             return set + offset;
-        set = 64 - bit;
+        set = 32 - bit;
         p++;
     }
     /*
-     * No zero yet, search remaining full words for a zero
+     * No zero yet, search remaining full bytes for a zero
      */
-    
-    res = __find_first_zero_bit (p, size - 64 * (p - addr));
+    res = find_first_zero_bit (p, size - 32 * (p - (unsigned long *) addr));
+
     return (offset + set + res);
 }
 
-static inline long
-__find_first_bit(const unsigned long * addr, unsigned long size)
+static inline unsigned long __ffs(unsigned long word)
 {
-    long d0, d1;
-    long res;
+    __asm__("bsfl %1,%0"
+            :"=r" (word)
+            :"rm" (word));
 
-    /*
-     * We must test the size in words, not in bits, because
-     * otherwise incoming sizes in the range -63..-1 will not run
-     * any scasq instructions, and then the flags used by the jz
-     * instruction will have whatever random value was in place
-     * before.  Nobody should call us like that, but
-     * find_next_bit() does when offset and size are at the same
-     * word and it fails to find a one itself.
-     */
-    size += 63;
-    size >>= 6;
-    if (!size)
-        return 0;
-    asm volatile(
-        "   repe; scasq\n"
-        "   jz 1f\n"
-        "   subq $8,%%rdi\n"
-        "   bsfq (%%rdi),%%rax\n"
-        "1: subq %[addr],%%rdi\n"
-        "   shlq $3,%%rdi\n"
-        "   addq %%rdi,%%rax"
-        :"=a" (res), "=&c" (d0), "=&D" (d1)
-        :"0" (0ULL), "1" (size), "2" (addr),
-         [addr] "r" (addr) : "memory");
-    return res;
+        return word;
 }
 
 /**
@@ -220,7 +180,16 @@ __find_first_bit(const unsigned long * addr, unsigned long size)
  */
 long find_first_bit(const unsigned long * addr, unsigned long size)
 {
-    return __find_first_bit(addr,size);
+    unsigned x = 0;
+
+    while (x < size) {
+        unsigned long val = *addr++;
+        if (val)
+            return __ffs(val) + x;
+
+        x += (sizeof(*addr)<<3);
+    }
+    return x;
 }
 
 /**
@@ -231,27 +200,32 @@ long find_first_bit(const unsigned long * addr, unsigned long size)
  */
 long find_next_bit(const unsigned long * addr, long size, long offset)
 {
-    const unsigned long * p = addr + (offset >> 6);
-    unsigned long set = 0, bit = offset & 63, res;
-    
-    if (bit) {
+        const unsigned long *p = addr + (offset >> 5);
+        int set = 0, bit = offset & 31, res;
+
+        if (bit) {
+            /*
+             * Look for nonzero in the first 32 bits:
+             */
+            __asm__("bsfl %1,%0\n\t"
+                    "jne 1f\n\t"
+                    "movl $32, %0\n"
+                    "1:"
+                    : "=r" (set)
+                    : "r" (*p >> bit));
+
+            if (set < (32 - bit))
+                return set + offset;
+            set = 32 - bit;
+            p++;
+        }
+
         /*
-         * Look for nonzero in the first 64 bits:
+         * No set bit yet, search remaining full words for a bit
          */
-        asm("bsfq %1,%0\n\t"
-            "cmoveq %2,%0\n\t"
-            : "=r" (set)
-            : "r" (*p >> bit), "r" (64L));
-        if (set < (64 - bit))
-            return set + offset;
-        set = 64 - bit;
-        p++;
-    }
-    /*
-     * No set bit yet, search remaining full words for a bit
-     */
-    res = __find_first_bit (p, size - 64 * (p - addr));
-    return (offset + set + res);
+        res = find_first_bit (p, size - 32 * (p - addr));
+
+        return (offset + set + res);
 }
 
 /**

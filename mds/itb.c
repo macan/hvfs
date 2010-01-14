@@ -180,7 +180,7 @@ void __itb_add_index(struct itb *i, u64 offset, long nr, char *name)
         /* ok, this entry is free, and nobody can race w/ me */
         ii[offset].flag = ITB_INDEX_UNIQUE;
         ii[offset].entry = nr;
-        hvfs_debug(mds, "FREE     ITB %p: %ld %ld, %s offset %ld, nr %ld\n",
+        hvfs_debug(mds, "FREE     ITB %p: %lld %lld, %s offset %lld, nr %ld\n",
                    i, i->h.puuid, i->h.itbid, name, offset, nr);
     } else if (ii[offset].flag == ITB_INDEX_UNIQUE) {
         /* only ONE entry, change flag to CONFLICT */
@@ -192,7 +192,7 @@ void __itb_add_index(struct itb *i, u64 offset, long nr, char *name)
         ii[f].entry = nr;
         /* update conflict state */
         atomic_inc(&i->h.pseudo_conflicts);
-        hvfs_debug(mds, "UNIQUE   ITB %p: %ld %ld, %s offset %ld, nr %ld\n",
+        hvfs_debug(mds, "UNIQUE   ITB %p: %lld %lld, %s offset %lld, nr %ld\n",
                    i, i->h.puuid, i->h.itbid, name, offset, nr);
     } else if (ii[offset].flag == ITB_INDEX_CONFLICT) {
         /* FIXME: have SOME entries, check to see if we need change flag to
@@ -205,7 +205,7 @@ void __itb_add_index(struct itb *i, u64 offset, long nr, char *name)
         ii[offset].conflict = f;
         /* it is hard to detemine the precise conflicts */
         atomic_inc(&i->h.pseudo_conflicts);
-        hvfs_debug(mds, "CONFLICT ITB %p: %ld %ld, %s offset %ld, nr %ld\n",
+        hvfs_debug(mds, "CONFLICT ITB %p: %lld %lld, %s offset %lld, nr %ld\n",
                    i, i->h.puuid, i->h.itbid, name, offset, nr);
     } else if (ii[offset].flag == ITB_INDEX_OVERFLOW) {
         hvfs_err(mds, "Hoo, this ITB overflowed, for now we can't handle it!\n");
@@ -257,7 +257,7 @@ int itb_add_ite(struct itb *i, struct hvfs_index *hi, void *data)
                 /* someone has set this bit, let us retry */
                 goto retry;
             }
-            hvfs_verbose(mds, "ITB %p: %ld, %ld, 0x%lx %s, offset %ld, nr %ld\n", 
+            hvfs_verbose(mds, "ITB %p: %lld, %lld, 0x%llx %s, offset %lld, nr %ld\n", 
                          i, i->h.puuid, i->h.itbid, hi->hash, 
                          hi->name, offset, nr);
             /* now we got a free ITE entry at position nr */
@@ -305,73 +305,125 @@ out:
     return err;
 }
 
+/*
+ * ITE unlink internal
+ */
+static inline void __ite_unlink(struct itb *i, u64 offset)
+{
+    struct itb_index *ii;
+    
+    ii = &i->index[offset];
+    ii->flag = ITB_INDEX_FREE;
+    if (offset >= (1 << i->h.adepth)) {
+        atomic_dec(&i->h.pseudo_conflicts);
+        i->h.itu--;
+    }
+    if (atomic_read(&i->h.max_offset) == ii->entry)
+        atomic_dec(&i->h.max_offset);
+    atomic_dec(&i->h.entries);
+    if (atomic_read(&i->h.entries) == 0)
+        atomic_set(&i->h.max_offset, 0);
+    /* clear the bitmap */
+    lib_bitmap_tac(i->bitmap, ii->entry);
+}
+
 /* 
  * itb_del_ite()
+ *
+ * NOTE: this function has NOT tested well yet, we may just fallback to the
+ * async unlink in the LS path of ite_unlink().
+ *
+ * NOTE: holding the itb.index_lock_w and other upper layer locks
  */
-void itb_del_ite(struct itb *i, struct ite *e, u64 offset)
+void itb_del_ite(struct itb *i, struct ite *e, u64 offset, u64 pos)
 {
-    u64 io, head = offset;
-    u32 prev;
+    struct itb_index *ii;
+    u64 total = 1 << (i->h.adepth + 1);
 
-    io = e - i->ite;
+    hvfs_debug(mds, "Try to del %lld @ pos %lld\n", offset, pos);
 
-    if (i->index[offset].flag == ITB_INDEX_FREE)
+    /* NOTE that the offset is the target to del, and io is the offset! */
+    ii = &i->index[pos];
+    if (ii->flag == ITB_INDEX_FREE) {
+        /* hooray, nothing should be deleted */
         return;
-    if (i->index[offset].flag == ITB_INDEX_UNIQUE) {
-        /* just free it */
-        i->index[offset].flag = ITB_INDEX_FREE;
-        goto clear_bitmap;
     }
-    
-    prev = offset;
-    do {
-        if (i->index[offset].entry == io) {
-            /* ok, del this entry */
-            if (offset == head) {
-                /* deleting the head, it cant be the tail */
-                /* copy the index reversely */
-                u32 next = i->index[offset].conflict;
-                do {
-                    i->index[offset] = i->index[next];
-                    offset = next;
-                    next = i->index[next].conflict;
-                } while (i->index[offset].flag != ITB_INDEX_UNIQUE);
-            } else if (i->index[offset].flag == ITB_INDEX_UNIQUE) {
-                /* deleting the tail, it cant be the head */
-                /* reset the prev's flag to UNIQUE */
-                i->index[prev].flag = ITB_INDEX_UNIQUE;
-            } else {
-                /* deleting a middle entry */
-                i->index[prev].conflict = i->index[offset].conflict;
-            }
-            i->index[offset].flag = ITB_INDEX_FREE;
-            i->h.itu--;
-            atomic_dec(&i->h.pseudo_conflicts);
-            break;
+    if (ii->flag == ITB_INDEX_UNIQUE) {
+        if (offset == pos) {
+            __ite_unlink(i, offset);
         }
-        prev = offset;
-    } while (i->index[offset].flag != ITB_INDEX_UNIQUE);
+    } else {
+        /* ho, we should loop in the list to find and delete the entry */
+        u64 saved = pos;
+        u64 prev = pos;
+        int quit = 0, needswap = 0, hit = 0;
 
-clear_bitmap:
-    /* no need to check the TAC result */
-    lib_bitmap_tac(i->bitmap, io);
+        pos = offset;
+        offset = saved;
+        do {
+        retry:
+            ii = &i->index[offset];
+            hvfs_debug(mds, "offset %lld <%x,%d,%d>, prev %lld\n", 
+                       offset, ii->flag, ii->entry, ii->conflict, prev);
+            if (ii->flag == ITB_INDEX_FREE)
+                break;
+            if (pos == offset || hit) {
+                /* ok, we get the unlink target */
+                if (offset == prev) {
+                    needswap = 1;
+                    prev = offset;
+                } else if (ii->flag == ITB_INDEX_UNIQUE) {
+                    i->index[prev].flag = ITB_INDEX_UNIQUE;
+                    __ite_unlink(i, offset);
+                    quit = 1;
+                } else {
+                    i->index[prev].conflict = ii->conflict;
+                    __ite_unlink(i, offset);
+                    quit = 1;
+                }
+            } else {
+                /* this is not the unlink target */
+                if (needswap) {
+                    u32 saved_entry = ii->entry;
+                    ii->entry = i->index[saved].entry;
+                    i->index[saved].entry = saved_entry;
+                    needswap = 0;
+                    hit = 1;
+                    hvfs_debug(mds, "swap %lld and %lld\n", offset, saved);
+                    goto retry;
+                }
+                if (ii->flag == ITB_INDEX_UNIQUE)
+                    quit = 1;
+                prev = offset;
+            }
+            offset = ii->conflict;
+        } while (offset < total && (!quit));
+        if (needswap) {
+            ii = &i->index[saved];
+            ASSERT(ii->flag == ITB_INDEX_UNIQUE, mds);
+            __ite_unlink(i, saved);
+        }
+    }
 }
 
 /*
  * ITE unlink
  */
-void ite_unlink(struct ite *e, struct itb *i, u64 offset)
+void ite_unlink(struct ite *e, struct itb *i, u64 offset, u64 pos)
 {
     if (likely(e->flag & ITE_FLAG_NORMAL)) {
         /* normal file */
         e->s.mdu.nlink--;
-        if (!e->s.mdu.nlink)
+        if (!e->s.mdu.nlink) {
             e->flag = ((e->flag & ~ITE_STATE_MASK) | ITE_UNLINKED);
-        else
+            /* ok, we add this itb in the async_unlink list :) */
+            if (unlikely(list_empty(&i->h.unlink)))
+                list_add_tail(&i->h.unlink, &hmo.async_unlink);
+        } else
             e->flag = ((e->flag & ~ITE_STATE_MASK) | ITE_SHADOW);
     } else if (e->flag & ITE_FLAG_LS) {
         /* FIXME: hard link file, nobody refer it, just delete it */
-        itb_del_ite(i, e, offset);
+        itb_del_ite(i, e, offset, pos);
     }
 }
 
@@ -400,7 +452,7 @@ void ite_create(struct hvfs_index *hi, struct ite *e)
         e->s.mdu.flags |= HVFS_MDU_IF_NORMAL;
         e->s.mdu.nlink = 1;
 
-        if (!mu->valid)
+        if (!mu || !mu->valid)
             return;
         if (mu->valid & MU_MODE)
             e->s.mdu.mode = mu->mode;
@@ -506,7 +558,7 @@ inline int ite_match(struct ite *e, struct hvfs_index *hi)
         } else
             return ITE_MATCH_MISS;
     } else if (hi->flag & INDEX_BY_NAME) {
-        if (memcmp(e->s.name, hi->name, hi->len) == 0) {
+        if (memcmp(e->s.name, hi->name, hi->len) == 0 && e->s.name[hi->len] == '\0') {
             return ITE_MATCH_HIT;
         } else
             return ITE_MATCH_MISS;
@@ -604,6 +656,7 @@ struct itb *get_free_itb(struct hvfs_txg *txg)
 #endif
     INIT_HLIST_NODE(&n->h.cbht);
     INIT_LIST_HEAD(&n->h.list);
+    INIT_LIST_HEAD(&n->h.unlink);
     INIT_LIST_HEAD(&n->h.overflow);
     /* init the lock region */
     if (hmo.conf.option & HVFS_MDS_ITB_RWLOCK) {
@@ -661,6 +714,7 @@ struct itb *itb_cow(struct itb *itb, struct hvfs_txg *txg)
 #endif
     INIT_HLIST_NODE(&n->h.cbht);
     INIT_LIST_HEAD(&n->h.list);
+    INIT_LIST_HEAD(&n->h.unlink);
     INIT_LIST_HEAD(&n->h.overflow);
     
     return n;
@@ -735,7 +789,7 @@ struct itb *itb_dirty(struct itb *itb, struct hvfs_txg *t, struct itb_lock *l,
         if (likely(itb->h.state == ITB_STATE_DIRTY))
             return itb;
         else {
-            hvfs_debug(mds, "Hoo, ITB state 0x%x in TXG: 0x%lx\n", itb->h.state, 
+            hvfs_debug(mds, "Hoo, ITB state 0x%x in TXG: 0x%llx\n", itb->h.state, 
                        t->txg);
             if (itb->h.state == ITB_STATE_CLEAN) {
                 /* init TXG, corner case */
@@ -798,7 +852,7 @@ struct itb *itb_dirty(struct itb *itb, struct hvfs_txg *t, struct itb_lock *l,
 
                     /* ok, recopy the new ITEs */
                     itb_cow_recopy(itb, n);
-                    hvfs_debug(mds, "ITB COWing %ld %p to %p\n", 
+                    hvfs_debug(mds, "ITB COWing %lld %p to %p\n", 
                                itb->h.itbid, itb, n);
                     mds_itb_prof_cow();
                 }
@@ -811,7 +865,7 @@ struct itb *itb_dirty(struct itb *itb, struct hvfs_txg *t, struct itb_lock *l,
             /* Step5: loser should retry the access */
             if (should_retry) {
                 itb_free(n);
-                hvfs_debug(mds, "loser cow ITB %ld from %p TXG %ld -> %ld, "
+                hvfs_debug(mds, "loser cow ITB %lld from %p TXG %lld -> %lld, "
                            "S %0x, BE %p %p\n", 
                            n->h.itbid, itb, t->txg, itb->h.txg, itb->h.state,
                            be, itb->h.be);
@@ -842,7 +896,7 @@ struct itb *itb_dirty(struct itb *itb, struct hvfs_txg *t, struct itb_lock *l,
          * complexity of TXG state machine */
         struct hvfs_txg *nt;
         
-        hvfs_debug(mds, "TXG %ld <-- ITB(%ld) %ld, reassign the TXG\n", 
+        hvfs_debug(mds, "TXG %lld <-- ITB(%lld) %lld, reassign the TXG\n", 
                    t->txg, itb->h.itbid, itb->h.txg);
         nt = mds_get_open_txg(&hmo);
         txg_put(t);
@@ -868,7 +922,7 @@ int itb_search(struct hvfs_index *hi, struct itb *itb, void *data,
                struct hvfs_txg *txg, struct itb **oi,
                struct hvfs_txg **otxg)
 {
-    u64 offset;
+    u64 offset, pos;
     u64 total = 1 << (itb->h.adepth + 1);
     atomic64_t *as;
     struct itb_index *ii;
@@ -878,7 +932,7 @@ int itb_search(struct hvfs_index *hi, struct itb *itb, void *data,
     /* NOTE: if we are in retrying, we know that the ITB will not COW
      * again! */
 retry:
-    offset = hi->hash & ((1 << itb->h.adepth) - 1);
+    pos = offset = hi->hash & ((1 << itb->h.adepth) - 1);
     /* get the ITE lock */
     l = &itb->lock[offset / ITB_LOCK_GRANULARITY];
     if (hi->flag & INDEX_LOOKUP) {
@@ -971,7 +1025,7 @@ retry:
                 /* this means the itb is cowed, we should refresh ourself */
                 goto refresh;
             }
-            ite_unlink(&itb->ite[ii->entry], itb, offset);
+            ite_unlink(&itb->ite[ii->entry], itb, offset, pos);
             memcpy(data, &(itb->ite[ii->entry].g), HVFS_MDU_SIZE);
         } else if (hi->flag & INDEX_LINK_ADD) {
             /* hard link */
@@ -1053,7 +1107,7 @@ int itb_readdir(struct hvfs_index *hi, struct itb *i, struct hvfs_md_reply *hmr)
  */
 void itb_dump(struct itb *i)
 {
-    char line[4096];
+    char *line;
     struct itb_index *ii;
     int j, l;
     
@@ -1061,18 +1115,21 @@ void itb_dump(struct itb *i)
     hvfs_info(mds, "Header of ITB %p:\n", i);
     hvfs_info(mds, "flag %x state %x depth %d adepth %d\n",
               i->h.flag, i->h.state, i->h.depth, i->h.adepth);
-    hvfs_info(mds, "entries %d, max_offset %d, conflicts %d, "
+    hvfs_info(mds, "entries %s%d%s, max_offset %d, conflicts %d, "
               "pseudo_conflicts %d\n",
-              atomic_read(&i->h.entries), atomic_read(&i->h.max_offset),
+              HVFS_COLOR_RED, atomic_read(&i->h.entries), HVFS_COLOR_END,
+              atomic_read(&i->h.max_offset),
               atomic_read(&i->h.conflicts), 
               atomic_read(&i->h.pseudo_conflicts));
-    hvfs_info(mds, "txg %ld puuid %ld itbid %ld hash %lx\n",
+    hvfs_info(mds, "txg %lld puuid %lld itbid %lld hash %llx\n",
               i->h.txg, i->h.puuid, i->h.itbid, i->h.hash);
     hvfs_info(mds, "be %p len %d inf %d itu %d\n",
               i->h.be, atomic_read(&i->h.len), i->h.inf, i->h.itu);
 
     /* dump the bitmap */
-    memset(line, 0, sizeof(line));
+    line = xzalloc(1024 * 128);
+    if (!line)
+        return;
     for (j = 0, l = 0; j < (1 << (ITB_DEPTH - 3)); j++) {
         l += sprintf(line + l, "%x", i->bitmap[j]);
     }
@@ -1092,6 +1149,7 @@ void itb_dump(struct itb *i)
         line[l] = '\0';
         hvfs_info(mds, "%s\n", line);
     }
+    xfree(line);
     return;
 }
 
@@ -1109,6 +1167,108 @@ void async_unlink(time_t t)
     sem_post(&hmo.unlink_sem);
 }
 
+/* async_unlink_ite()
+ *
+ * NOTE: holding the itb.rlock
+ */
+void async_unlink_ite(struct itb *i, int *dc)
+{
+    u64 offset = 0;
+    u64 total = 1 << (i->h.adepth + 1);
+    atomic64_t *as;
+    struct itb_index *ii;
+    struct itb_lock *l;
+    struct ite *e;
+
+    l = &i->lock[offset / ITB_LOCK_GRANULARITY];
+    itb_index_wlock(l);
+    as = &hmo.prof.itb.async_unlink;
+
+    while (offset < total) {
+        ii = &i->index[offset];
+        if (ii->flag == ITB_INDEX_FREE) {
+            /* this offset is a hole */
+            offset++;
+            continue;
+        }
+        if (ii->flag == ITB_INDEX_UNIQUE) {
+            /* this offset only have one entry */
+            e = &i->ite[ii->entry];
+            if ((e->flag & ITE_STATE_MASK) == ITE_UNLINKED) {
+                __ite_unlink(i, offset);
+                (*dc)++;
+                atomic64_inc(as);
+            }
+        } else {
+            /* this offset has at least two entries */
+            u64 saved = offset;
+            u64 prev = offset;
+            int quit = 0, needswap = 0;
+            
+            hvfs_debug(mds, "Hooray offset %lld\n", offset);
+            do {
+            retry:
+                ii = &i->index[offset];
+                hvfs_debug(mds, "offset %lld <%x,%d,%d>\n", 
+                           offset, ii->flag, ii->entry, ii->conflict);
+                if (ii->flag == ITB_INDEX_FREE)
+                    break;
+                e = &i->ite[ii->entry];
+                hvfs_debug(mds, "e->flag %x\n", e->flag & ITE_STATE_MASK);
+                if ((e->flag & ITE_STATE_MASK) == ITE_UNLINKED) {
+                    hvfs_debug(mds, "prev %lld offset %lld\n", prev, offset);
+                    if (offset == prev) {
+                        /* unlink the head, and we know that there is a next
+                         * entry. we must loop in the list and swap the first
+                         * unlinked entry to this location */
+                        needswap = 1;
+                        prev = offset;
+                    } else if (ii->flag == ITB_INDEX_UNIQUE) {
+                        /* unlink the tail */
+                        i->index[prev].flag = ITB_INDEX_UNIQUE;
+                        __ite_unlink(i, offset);
+                        quit = 1;
+                    } else {
+                        /* unlink the middle entry */
+                        i->index[prev].conflict = ii->conflict;
+                        __ite_unlink(i, offset);
+                        hvfs_debug(mds, "del offset %lld prev %lld, next %d\n", 
+                                   offset, prev, ii->conflict);
+                    }
+                    (*dc)++;
+                    atomic64_inc(as);
+                } else {
+                    if (needswap) {
+                        u32 saved_entry = ii->entry;
+                        ii->entry = i->index[saved].entry;
+                        i->index[saved].entry = saved_entry;
+                        needswap = 0;
+                        hvfs_debug(mds, "swap %lld and %lld\n", offset, saved);
+                        /* ok, we need restart the unlink process */
+                        goto retry;
+                    }
+                    if (ii->flag == ITB_INDEX_UNIQUE)
+                        quit = 1;
+                    prev = offset;
+                }
+                offset = ii->conflict;
+            } while (offset < total && (!quit));
+            if (needswap) {
+                /* this means we need free the head now */
+                ii = &i->index[saved];
+                ASSERT(ii->flag == ITB_INDEX_UNIQUE, mds);
+                __ite_unlink(i, saved);
+            }
+            offset = saved;
+        }
+        offset++;
+        if (*dc >= hmo.conf.max_async_unlink)
+            break;
+    }
+
+    itb_index_wunlock(l);
+}
+
 /* async_unlink_local()
  *
  * Delete the dangling ITEs within this local node periodically
@@ -1116,6 +1276,8 @@ void async_unlink(time_t t)
 void *async_unlink_local(void *arg)
 {
     sigset_t set;
+    struct itbh *ih;
+    int dc = 0;                 /* counter for the dealt ITEs */
     int err = 0;
 
     /* first, let us block the SIGALRM */
@@ -1129,7 +1291,22 @@ void *async_unlink_local(void *arg)
             continue;
         hvfs_debug(mds, "Unlink thread wakeup to clean the dangling ITEs.\n");
         /* ok, let us scan the ITBs */
-        /* FIXME */
+        list_for_each_entry(ih, &hmo.async_unlink, unlink) {
+            xrwlock_rlock(&ih->lock);
+            if (ih->state == ITB_STATE_COWED) {
+                /* ok, this ITB is stale, we just drop this guy and gc it in
+                 * the next unlink chance. So, the unlink may dangling for a
+                 * very long time if this ITB never touched again soon. */
+                xrwlock_runlock(&ih->lock);
+                continue;
+            }
+            /* hooray, let us deal with this itb */
+            async_unlink_ite((struct itb *)ih, &dc);
+            xrwlock_runlock(&ih->lock);
+            if (dc < hmo.conf.max_async_unlink)
+                break;
+        }
+        hvfs_info(mds, "In this wave we unlink %d ITEs\n", dc);
     }
 
     return ERR_PTR(err);

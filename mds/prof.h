@@ -91,6 +91,7 @@ struct mds_itb_prof
     atomic64_t rsearch_depth;   /* total read search depth */
     atomic64_t wsearch_depth;   /* total write search depth */
     atomic64_t cowed;           /* # of COWed ITBs */
+    atomic64_t async_unlink;    /* # of async unlinks */
 };
 
 struct mds_prof

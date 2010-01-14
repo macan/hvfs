@@ -56,6 +56,9 @@ struct mds_conf
                                      lnet serve-in threads' pool
                                      initialization */
 
+    int max_async_unlink;       /* max # of async unlink in one unlink
+                                 * action */
+
     /* intervals */
     int profiling_thread_interval;
     int txg_interval;
@@ -117,6 +120,8 @@ struct hvfs_mds_object
 #define HMO_STATE_PAUSE         0x02
 #define HMO_STATE_RDONLY        0x03
     u64 state;
+
+    struct list_head async_unlink;
 
     /* the following region is used for threads */
     time_t unlink_ts;
@@ -195,6 +200,7 @@ void itb_dump(struct itb *);
 void async_unlink(time_t t);
 int unlink_thread_init(void);
 void unlink_thread_destroy(void);
+void async_unlink_ite(struct itb *, int *);
 
 /* for tx.c */
 struct hvfs_tx *mds_alloc_tx(u16, struct xnet_msg *);
