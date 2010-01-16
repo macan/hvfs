@@ -37,7 +37,7 @@
 #include "hvfs_const.h"
 #include "xhash.h"
 
-/* This section for HVFS cmds */
+/* This section for HVFS cmds & reqs */
 /* Client to MDS */
 #define HVFS_CLT2MDS_BASE       0x8000000000000000
 #define HVFS_CLT2MDS_STATFS     0x8001000000000000

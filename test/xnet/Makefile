@@ -18,7 +18,7 @@ all : $(TEST_XNET_SOURCE:.c=.ut)
 
 %.ut : %.o $(XNET_LIB) $(MDS_LIB) $(HVFS_LIB)
 	@echo -e " " CC"\t" $@
-	@$(CC) $(CFLAGS) $< -o $@ -L$(XNET) -lxnet -L$(MDS) -lmds \
+	@$(CC) $(CFLAGS) $(LFLAGS) $< -o $@ -L$(XNET) -lxnet -L$(MDS) -lmds \
 			-L$(LIB_PATH) -lhvfs
 
 clean :

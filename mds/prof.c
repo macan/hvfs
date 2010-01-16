@@ -33,14 +33,19 @@ void dump_profiling(time_t t)
     hmo.prof.ts = t;
     hvfs_info(mds, "-- ITB Cache Size %d\n", 
               atomic_read(&hmo.ic.csize));
-    hvfs_info(mds, "|  CBHT Prof: lookup %ld, modify %ld, split %ld, "
-              "buckets %ld, depth %ld\n",
+    hvfs_info(mds, "|  CBHT Prof: lookup %s%ld%s, modify %s%ld%s, split %s%ld%s, "
+              "buckets %s%ld%s, depth %ld\n",
+              HVFS_COLOR_RED,
               atomic64_read(&hmo.prof.cbht.lookup),
+              HVFS_COLOR_END, HVFS_COLOR_GREEN,
               atomic64_read(&hmo.prof.cbht.modify),
+              HVFS_COLOR_END, HVFS_COLOR_YELLOW,
               atomic64_read(&hmo.prof.cbht.split),
+              HVFS_COLOR_END, HVFS_COLOR_PINK,
               atomic64_read(&hmo.prof.cbht.buckets),
+              HVFS_COLOR_END,
               atomic64_read(&hmo.prof.cbht.depth));
     hvfs_info(mds, "|  ITB Prof: cowed %ld\n",
               atomic64_read(&hmo.prof.itb.cowed));
-    hvfs_info(mds, "-- ITC Prof: ftx %d\n", hmo.txc.ftx);
+    hvfs_info(mds, "-- ITC Prof: ftx %d\n", atomic_read(&hmo.txc.ftx));
 }

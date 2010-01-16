@@ -59,6 +59,11 @@ struct mds_conf
     int max_async_unlink;       /* max # of async unlink in one unlink
                                  * action */
 
+    /* misc configs */
+    int txc_hash_size;          /* TXC hash table size */
+    int txc_ftx;                /* TXC init free TXs */
+    int cbht_bucket_depth;      /* CBHT bucket depth */
+
     /* intervals */
     int profiling_thread_interval;
     int txg_interval;
@@ -87,6 +92,7 @@ struct hvfs_mds_info
     u64 root_salt;
     u64 root_uuid;
     u64 group;
+    u64 uuid_base;              /* the base value of UUID allocation */
     atomic64_t mi_tx;           /* next tx # */
     atomic64_t mi_txg;          /* next txg # */
     atomic64_t mi_uuid;         /* next file and dir uuid */
@@ -161,7 +167,7 @@ void mds_destroy(void);
 void mds_reset_itimer(void);
 
 /* for dispatch.c */
-void mds_client_dispatch(struct xnet_msg *msg);
+int mds_client_dispatch(struct xnet_msg *msg);
 void mds_mds_dispatch(struct xnet_msg *msg);
 void mds_mdsl_dispatch(struct xnet_msg *msg);
 void mds_ring_dispatch(struct xnet_msg *msg);
@@ -205,6 +211,7 @@ void async_unlink_ite(struct itb *, int *);
 /* for tx.c */
 struct hvfs_tx *mds_alloc_tx(u16, struct xnet_msg *);
 void mds_free_tx(struct hvfs_tx *);
+void mds_drop_tx(struct hvfs_tx *);
 void mds_pre_free_tx(int);
 void mds_get_tx(struct hvfs_tx *);
 void mds_put_tx(struct hvfs_tx *);
@@ -257,5 +264,16 @@ struct dhe *mds_dh_insert(struct dh *, struct hvfs_index *);
 struct dhe *mds_dh_search(struct dh *, u64);
 int mds_dh_remove(struct dh *, u64);
 u64 mds_get_itbid(struct dhe *, u64);
+
+/* for c2m.c, client 2 mds APIs */
+void mds_statfs(struct hvfs_tx *);
+void mds_lookup(struct hvfs_tx *);
+void mds_create(struct hvfs_tx *);
+void mds_release(struct hvfs_tx *);
+void mds_update(struct hvfs_tx *);
+void mds_linkadd(struct hvfs_tx *);
+void mds_unlink(struct hvfs_tx *);
+void mds_symlink(struct hvfs_tx *);
+void mds_lb(struct hvfs_tx *);
 
 #endif

@@ -53,7 +53,7 @@ struct hvfs_txc
     struct list_head lru;       /* only for commited TX */
     xlock_t lock;               /* protect lru list */
     int hsize;                  /* hash table size */
-    int ftx;                    /* free TXs */
+    atomic_t ftx;               /* free TXs */
 };
 
 #define MDS_TXC_DEFAULT_SIZE    (1024 * 8)

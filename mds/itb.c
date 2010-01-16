@@ -264,16 +264,20 @@ int itb_add_ite(struct itb *i, struct hvfs_index *hi, void *data)
             ite = &i->ite[nr];
             memset(ite, 0, sizeof(struct ite));
             ite->hash = hi->hash;
-            ite->uuid = atomic64_inc_return(&hmi.mi_uuid);
+            /* setting up the ITE fields */
             if (unlikely(hi->flag & INDEX_CREATE_LINK))
                 ite->flag |= ITE_FLAG_LS;
             else
                 ite->flag |= ITE_FLAG_NORMAL;
             
-            if (hi->flag & INDEX_CREATE_DIR) {
-                ite->flag |= ITE_FLAG_SDT;
-            } else if (hi->flag & INDEX_CREATE_COPY) {
+            if (unlikely(hi->flag & INDEX_CREATE_COPY)) {
                 ite->flag |= ITE_FLAG_GDT;
+            } else {
+                ite->uuid = atomic64_inc_return(&hmi.mi_uuid) | hmi.uuid_base;
+                if (hi->flag & INDEX_CREATE_DIR) {
+                    ite->flag |= ITE_FLAG_SDT;
+                    ite->uuid |= HVFS_UUID_HIGHEST_BIT;
+                }
             }
             if (likely(hi->flag & INDEX_CREATE_SMALL)) {
                 ite->flag |= ITE_FLAG_SMALL;
@@ -434,9 +438,9 @@ void ite_create(struct hvfs_index *hi, struct ite *e)
 {
     /* there is always a struct mdu_update with normal create request */
 
-    memcpy(&e->s.name, hi->name, hi->len);
-    if (hi->len < HVFS_MAX_NAME_LEN)
-        e->s.name[hi->len] = '\0';
+    memcpy(&e->s.name, hi->name, hi->namelen);
+    if (hi->namelen < HVFS_MAX_NAME_LEN)
+        e->s.name[hi->namelen] = '\0';
     
     if (unlikely(hi->flag & INDEX_CREATE_COPY)) {
         /* hi->data is MDU */
@@ -444,12 +448,32 @@ void ite_create(struct hvfs_index *hi, struct ite *e)
     } else if (unlikely(hi->flag & INDEX_CREATE_LINK)) {
         /* hi->data is LS */
         memcpy(&e->s.ls, hi->data, sizeof(struct link_source));
+    } else if (hi->flag & INDEX_SYMLINK) {
+        /* hi->data is symname */
+        e->s.mdu.flags |= (HVFS_MDU_IF_NORMAL | HVFS_MDU_IF_SYMLINK);
+        if (e->flag == ITE_FLAG_SMALL)
+            e->s.mdu.flags |= HVFS_MDU_IF_SMALL;
+        else if (e->flag == ITE_FLAG_LARGE)
+            e->s.mdu.flags |= HVFS_MDU_IF_LARGE;
+        e->s.mdu.nlink = 1;
+        /* FIXME: we should set the *time here! */
+        
+        if (hi->dlen > sizeof(e->s.mdu.symname)) {
+            /* FIXME: we do not support long symlink :( */
+            hvfs_warning(mds, "Long SYMLINK not supported yet, and "
+                         "we do not fail at this:(\n");
+        } else 
+            memcpy(e->s.mdu.symname, hi->data, hi->dlen);
     } else {
         /* INDEX_CREATE_DIR and non-flag, mdu_update */
         struct mdu_update *mu = (struct mdu_update *)hi->data;
-    
+
         /* default fields */
-        e->s.mdu.flags |= HVFS_MDU_IF_NORMAL;
+        e->s.mdu.flags |= (HVFS_MDU_IF_NORMAL);
+        if (e->flag == ITE_FLAG_SMALL)
+            e->s.mdu.flags |= HVFS_MDU_IF_SMALL;
+        else if (e->flag == ITE_FLAG_LARGE)
+            e->s.mdu.flags |= HVFS_MDU_IF_LARGE;
         e->s.mdu.nlink = 1;
 
         if (!mu || !mu->valid)
@@ -558,7 +582,8 @@ inline int ite_match(struct ite *e, struct hvfs_index *hi)
         } else
             return ITE_MATCH_MISS;
     } else if (hi->flag & INDEX_BY_NAME) {
-        if (memcmp(e->s.name, hi->name, hi->len) == 0 && e->s.name[hi->len] == '\0') {
+        if (memcmp(e->s.name, hi->name, hi->namelen) == 0 &&
+            e->s.name[hi->namelen] == '\0') {
             return ITE_MATCH_HIT;
         } else
             return ITE_MATCH_MISS;

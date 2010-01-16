@@ -22,11 +22,12 @@
  */
 
 #include "hvfs.h"
-#incldue "xtable.h"
+#include "xtable.h"
 #include "tx.h"
 #include "xnet.h"
+#include "mds.h"
 
-void mds_client_dispatch(struct xnet_msg *msg)
+int mds_client_dispatch(struct xnet_msg *msg)
 {
     struct hvfs_tx *tx;
     u16 op;
@@ -42,7 +43,7 @@ void mds_client_dispatch(struct xnet_msg *msg)
     if (!tx) {
         /* do not retry myself */
         hvfs_err(mds, "mds_alloc_tx() failed");
-        return;
+        return -ENOMEM;
     }
 
     switch (msg->tx.cmd) {
@@ -71,8 +72,9 @@ void mds_client_dispatch(struct xnet_msg *msg)
         mds_lb(tx);
         break;
     default:
-        hvfs_err(mds, "Invalid client2MDS command: %x%lx\n", req->cmd);
+        hvfs_err(mds, "Invalid client2MDS command: 0x%lx\n", msg->tx.cmd);
     }
+    return 0;
 }
 
 void mds_mds_dispatch(struct xnet_msg *msg)
@@ -89,7 +91,7 @@ void mds_mds_dispatch(struct xnet_msg *msg)
         /* FIXME: load bitmap */
     } else if (msg->tx.cmd == HVFS_MDS2MDS_LD) {
         /* FIXME: load dir hash entry, just return the hvfs_index */
-        mds_ldh(msg);
+/*         mds_ldh(msg); */
     }
 }
 

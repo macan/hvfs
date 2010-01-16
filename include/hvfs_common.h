@@ -60,6 +60,7 @@ struct mdu
 #define HVFS_MDU_IF_NORMAL      0x08000000 /* normal file */
 #define HVFS_MDU_IF_LARGE       0x04000000 /* large file */
 #define HVFS_MDU_IF_SMALL       0x02000000 /* small file */
+#define HVFS_MDU_IF_SYMLINK     0x01000000 /* symlink file */
 
 #define HVFS_MDU_IF_LINKT       0x00800000 /* hard link target */
     u32 flags;

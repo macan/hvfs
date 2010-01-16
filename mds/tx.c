@@ -67,11 +67,25 @@ init_tx:
     return tx;
 }
 
+/* mds_free_tx()
+ *
+ * Note: this function should NOT be called unless the TX need to be dropped
+ * immediately!
+ */
 void mds_free_tx(struct hvfs_tx *tx)
 {
     ASSERT(list_empty(&tx->lru), mds);
+    /* evict the TX, and we should set the tx->state to DONE to pass the
+     * assertation */
+    tx->state = HVFS_TX_DONE;
+    mds_txc_evict(&hmo.txc, tx);
+    
+    mds_put_tx(tx);
+    txg_put(tx->txg);
+
     xlock_lock(&hmo.txc.lock);
     list_add_tail(&tx->lru, &hmo.txc.lru);
+    atomic_inc(&hmo.txc.ftx);
     xlock_unlock(&hmo.txc.lock);
 }
 
@@ -144,7 +158,7 @@ int mds_init_txc(struct hvfs_txc *txc, int hsize, int ftx)
     }
 
     txc->hsize = hsize;
-    txc->ftx = ftx;
+    atomic_set(&txc->ftx, ftx);
 out:
     return err;
 }
@@ -154,7 +168,7 @@ int mds_destroy_txc(struct hvfs_txc *txc)
     /* NOTE: there is no need to destroy the TXC actually */
     if (txc->txht)
         xfree(txc->txht);
-    txc->ftx = 0;
+    atomic_set(&txc->ftx, 0);
     return 0;
 }
 
@@ -165,11 +179,11 @@ struct hvfs_tx *mds_txc_alloc_tx(struct hvfs_txc *txc)
     struct hvfs_tx *tx = NULL;
     
     xlock_lock(&txc->lock);
-    if (txc->ftx > MDS_TXC_MAX_FREE) {
+    if (atomic_read(&txc->ftx) > MDS_TXC_MAX_FREE) {
         /* ok, we need to free some memory for other modules */
     }
-    if (txc->ftx > 0) {
-        txc->ftx--;
+    if (atomic_read(&txc->ftx) > 0) {
+        atomic_dec(&txc->ftx);
         l = txc->lru.next;
         ASSERT(l != &txc->lru, mds);
         list_del_init(l);
@@ -231,7 +245,7 @@ int mds_txc_add(struct hvfs_txc *txc, struct hvfs_tx *tx)
 struct hvfs_tx *mds_txc_search(struct hvfs_txc *txc, u64 site, u64 reqno)
 {
     struct regular_hash *rh;
-    struct hvfs_tx *tx;
+    struct hvfs_tx *tx = NULL;
     struct hlist_node *l;
     int i, found = 0;
 
@@ -301,7 +315,7 @@ void mds_tx_done(struct hvfs_tx *tx)
     if (tx->op == HVFS_TX_FORGET) {
         xlock_lock(&hmo.txc.lock);
         list_add_tail(&tx->lru, &hmo.txc.lru);
-        hmo.txc.ftx++;
+        atomic_inc(&hmo.txc.ftx);
         xlock_unlock(&hmo.txc.lock);
         mds_pre_free_tx(HVFS_TX_PRE_FREE_HINT);
     }
@@ -323,7 +337,7 @@ void mds_tx_reply(struct hvfs_tx *tx)
         /* need reply, but no commit */
         xlock_lock(&hmo.txc.lock);
         list_add_tail(&tx->lru, &hmo.txc.lru);
-        hmo.txc.ftx++;
+        atomic_inc(&hmo.txc.ftx);
         xlock_unlock(&hmo.txc.lock);
         mds_pre_free_tx(HVFS_TX_PRE_FREE_HINT);
     }
@@ -349,7 +363,7 @@ void mds_tx_commit(struct hvfs_tx *tx)
         xlock_lock(&hmo.txc.lock);
         ASSERT(list_empty(&tx->lru), mds);
         list_add_tail(&tx->lru, &hmo.txc.lru);
-        hmo.txc.ftx++;
+        atomic_inc(&hmo.txc.ftx);
         xlock_unlock(&hmo.txc.lock);
         mds_pre_free_tx(HVFS_TX_PRE_FREE_HINT);
     }

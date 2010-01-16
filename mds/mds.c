@@ -266,6 +266,9 @@ int mds_init(int bdepth)
     hmo.conf.option = HVFS_MDS_ITB_RWLOCK;
     hmo.conf.max_async_unlink = 100;
     hmo.conf.unlink_interval = 1;
+    hmo.conf.txc_hash_size = 1024;
+    hmo.conf.txc_ftx = 0;
+    hmo.conf.cbht_bucket_depth = bdepth;
 
     /* Init the signal handlers */
     err = mds_init_signal();
@@ -276,6 +279,12 @@ int mds_init(int bdepth)
     err = mds_setup_timers();
     if (err)
         goto out_timers;
+
+    /* FIXME: init the TXC subsystem */
+    err = mds_init_txc(&hmo.txc, hmo.conf.txc_hash_size, 
+                       hmo.conf.txc_ftx);
+    if (err)
+        goto out_txc;
 
     /* FIXME: init the xnet subsystem */
 
@@ -296,7 +305,7 @@ int mds_init(int bdepth)
         goto out_tx;
 
     /* FIXME: init hte CBHT subsystem */
-    err = mds_cbht_init(&hmo.cbht, bdepth);
+    err = mds_cbht_init(&hmo.cbht, hmo.conf.cbht_bucket_depth);
     if (err)
         goto out_cbht;
 
@@ -318,6 +327,7 @@ out_unlink:
 out_cbht:
 out_tx:
 out_dh:
+out_txc:
 out_timers:
 out_signal:
     return err;
@@ -343,6 +353,9 @@ void mds_destroy(void)
     /* destroy the dh */
     mds_dh_destroy(&hmo.dh);
 
+    /* destroy the txc */
+    mds_destroy_txc(&hmo.txc);
+    
     /* destroy the dconf */
     dconf_destroy();
 }

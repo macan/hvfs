@@ -27,11 +27,11 @@
 
 #ifdef UNIT_TEST
 char *ipaddr1[] = {
-    "10.10.111.117",
+    "172.25.38.242",
 };
 
 char *ipaddr2[] = {
-    "10.10.111.9",
+    "172.25.38.242",
 };
 
 short port1[] = {
@@ -117,10 +117,9 @@ int main(int argc, char *argv[])
     
 out_unreg:
     xnet_unregister_type(xc);
-    st_destroy();
-
-    mds_destroy();
 out:
+    st_destroy();
+    mds_destroy();
     return err;
 }
 #endif

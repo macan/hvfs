@@ -20,7 +20,7 @@ all : $(TEST_MDS_SOURCE:.c=.ut)
 
 %.ut : %.o $(MDS_LIB) $(HVFS_LIB)
 	@echo -e " " CC"\t" $@
-	@$(CC) $(CFLAGS) $(TEST_MDS_DEPSRC) $< -o $@ -L$(MDS) -lmds \
+	@$(CC) $(CFLAGS) $(LFLAGS) $(TEST_MDS_DEPSRC) $< -o $@ -L$(MDS) -lmds \
 			-L$(LIB_PATH) -lhvfs
 
 clean :

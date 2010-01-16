@@ -106,7 +106,7 @@
                  KERN_DEBUG, "exit: " f, ## a)
 
 #define hvfs_warning(module, f, a...)           \
-    hvfs_tracing((HVFS_WARNING | HVFS_PRECISE), \
+    hvfs_tracing((HVFS_WARN | HVFS_PRECISE),    \
                  hvfs_##module##_tracing_flags, \
                  KERN_WARNING, f, ##a)
 

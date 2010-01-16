@@ -49,7 +49,7 @@ void hmr_print(struct hvfs_md_reply *hmr)
         return;
     hi = (struct hvfs_index *)p;
     hvfs_info(mds, "hmr-> HI: len %d, flag 0x%x, uuid %ld, hash %ld, itbid %ld, "
-              "puuid %ld, psalt %ld\n", hi->len, hi->flag, hi->uuid, hi->hash,
+              "puuid %ld, psalt %ld\n", hi->namelen, hi->flag, hi->uuid, hi->hash,
               hi->itbid, hi->puuid, hi->psalt);
     p += sizeof(struct hvfs_index);
     if (hmr->flag & MD_REPLY_WITH_MDU) {
@@ -91,7 +91,7 @@ void insert_ite(u64 puuid, u64 itbid, char *name, struct mdu_update *imu,
     hi->itbid = itbid;
     hi->flag = INDEX_CREATE;
     memcpy(hi->name, name, strlen(name));
-    hi->len = strlen(name);
+    hi->namelen = strlen(name);
     mu = (struct mdu_update *)((void *)hi + sizeof(struct hvfs_index) + 
                                strlen(name));
     memcpy(mu, imu, sizeof(struct mdu_update));
@@ -131,7 +131,7 @@ void remove_ite(u64 puuid, u64 itbid, char *name,
     hi->itbid = itbid;
     hi->flag = INDEX_UNLINK | INDEX_BY_NAME;
     memcpy(hi->name, name, strlen(name));
-    hi->len = strlen(name);
+    hi->namelen = strlen(name);
     hi->data = NULL;
 
     memset(hmr, 0, sizeof(*hmr));
@@ -167,7 +167,7 @@ void lookup_ite(u64 puuid, u64 itbid, char *name, u64 flag ,
     hi->itbid = itbid;
     hi->flag = flag;
     memcpy(hi->name, name, strlen(name));
-    hi->len = strlen(name);
+    hi->namelen = strlen(name);
     
     memset(hmr, 0, sizeof(*hmr));
     txg = mds_get_open_txg(&hmo);
@@ -213,7 +213,7 @@ void async_unlink_test(void)
             b++;
         } else
             hi->flag = INDEX_CREATE;
-        hi->len = strlen(hi->name);
+        hi->namelen = strlen(hi->name);
         memset(&hmr, 0, sizeof(hmr));
         txg = mds_get_open_txg(&hmo);
         err = mds_cbht_search(hi, &hmr, txg, &txg);
@@ -229,7 +229,7 @@ void async_unlink_test(void)
     /* remove one */
     for (a = 0; a < 1024; a++) {
         sprintf(hi->name, "shit-%d", a);
-        hi->len = strlen(hi->name);
+        hi->namelen = strlen(hi->name);
         hi->flag = INDEX_UNLINK | INDEX_BY_NAME | INDEX_ITE_ACTIVE;
         memset(&hmr, 0, sizeof(hmr));
         txg = mds_get_open_txg(&hmo);
@@ -377,7 +377,7 @@ int st_main(int argc, char *argv[])
     }
     lib_timer_stop(&end);
     lib_timer_echo(&begin, &end, x * k);
-    hvfs_info(mds, "Shadow lookup ite is done, total miss %ld ...\n", 
+    hvfs_info(mds, "Shadow lookup ite is done, total miss %lld ...\n", 
               atomic64_read(&miss));
     
     itb_cache_destroy(&hmo.ic);

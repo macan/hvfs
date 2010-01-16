@@ -176,7 +176,7 @@ struct dhe *mds_dh_load(struct dh *dh, u64 duuid)
     if (IS_ERR(e)) {
         hvfs_err(mds, "Hoo, we can NOT find the GDT uuid %lld(%lld).\n",
                  hmi.gdt_uuid, duuid);
-        hvfs_err(mds, "This is a fatal error %lld! We must die.\n", 
+        hvfs_err(mds, "This is a fatal error %ld! We must die.\n", 
                  PTR_ERR(e));
         ASSERT(0, mds);
     }
@@ -185,7 +185,7 @@ struct dhe *mds_dh_load(struct dh *dh, u64 duuid)
     /* find the MDS server */
     p = ring_get_point(thi.itbid, hmi.gdt_salt, hmo.chring[CH_RING_MDS]);
     if (IS_ERR(p)) {
-        hvfs_err(mds, "ring_get_point(%lld) failed with %lld\n", 
+        hvfs_err(mds, "ring_get_point(%lld) failed with %ld\n", 
                  thi.itbid, PTR_ERR(p));
         e = ERR_PTR(-ECHP);
         goto out_free;
@@ -219,7 +219,7 @@ send_msg:
     /* key, we got the mdu, let us insert it to the dh table */
     e = mds_dh_insert(dh, rhi);
     if (IS_ERR(e)) {
-        hvfs_err(mds, "mds_dh_insert() failed %lld\n", PTR_ERR(e));
+        hvfs_err(mds, "mds_dh_insert() failed %ld\n", PTR_ERR(e));
         goto out_free;
     }
     
@@ -240,7 +240,7 @@ out_free:
  */
 struct dhe *mds_dh_search(struct dh *dh, u64 duuid)
 {
-    struct dhe *e;
+    struct dhe *e = ERR_PTR(-EINVAL);
     struct regular_hash *rh;
     struct hlist_node *l;
     int i, found = 0;

@@ -22,20 +22,21 @@ COMPILE_DATE = `date`
 COMPILE_HOST = `hostname`
 
 # Debuging the memory and locks
-XCFLAGS = -O2 -rdynamic -g -pg
+XCFLAGS = -O2 -rdynamic -g -pg -std=gnu99
 
 CFLAGS += $(XCFLAGS)
 CFLAGS += -Wall -DCDATE="\"$(COMPILE_DATE)\"" \
-			-DCHOST="\"$(COMPILE_HOST)\"" -I$(INC_PATH) -lrt -lpthread \
+			-DCHOST="\"$(COMPILE_HOST)\"" -I$(INC_PATH) \
 			-I$(LIB_PATH) -I$(MDS) -D_GNU_SOURCE\
 			-DHVFS_TRACING -DHVFS_DEBUG_MEMORY -DHVFS_DEBUG_LOCK_ \
             -D_USE_SPINLOCK_
-LFLAGS +=
+LFLAGS += -lrt -lpthread
 
 # Region for depend files
 TEST_MDS_SOURCE = cbht.c tx.c dh.c cmd_sender.c
-TEST_XNET_SOURCE = xnet.c
-MDS_AR_SOURCE = itb.c mds.c txg.c cbht.c tx.c prof.c conf.c dh.c xtable.c
+TEST_XNET_SOURCE = xnet.c mds.c
+MDS_AR_SOURCE = itb.c mds.c txg.c cbht.c tx.c prof.c conf.c dh.c xtable.c \
+				dispatch.c c2m.c
 LIB_AR_SOURCE = lib.c ring.c hash.c time.c bitmap.c xlock.c
 XNET_AR_SOURCE = xnet.c xnet_simple.c
 INC_H_SOURCE = atomic.h err.h hvfs.h hvfs_common.h hvfs_const.h hvfs_k.h \

@@ -24,17 +24,25 @@
 #ifndef __HVFS_CONST_H__
 #define __HVFS_CONST_H__
 
-#define HVFS_MAX_NAME_LEN       256
+#define HVFS_MAX_NAME_LEN       256 /* Herr, we do NOT support 256-length
+                                     * name actually */
 #define MDS_DCONF_MAX_NAME_LEN  64
+
+/* UUID bits
+ *
+ * |<-63..43->|<-42..0->|
+ */
+#define HVFS_MAX_UUID_PER_MDS   (0x7ffffffffff) /* 2^43 - 1 */
+#define HVFS_UUID_HIGHEST_BIT   (0x8000000000000000)
 
 static char *hvfs_ccolor[] __attribute__((unused))= {
     "\033[0;40;31m",            /* red */
-    "\033[0;40;32m",
-    "\033[0;40;33m",
-    "\033[0;40;34m",
-    "\033[0;40;35m",
-    "\033[0;40;36m",
-    "\033[0;40;37m",
+    "\033[0;40;32m",            /* green */
+    "\033[0;40;33m",            /* yellow */
+    "\033[0;40;34m",            /* blue */
+    "\033[0;40;35m",            /* pink */
+    "\033[0;40;36m",            /* yank */
+    "\033[0;40;37m",            /* white */
     "\033[0m",
 };
 #define HVFS_COLOR(x)  (hvfs_ccolor[x])
