@@ -63,6 +63,7 @@ struct mds_conf
     int txc_hash_size;          /* TXC hash table size */
     int txc_ftx;                /* TXC init free TXs */
     int cbht_bucket_depth;      /* CBHT bucket depth */
+    int itb_cache;
 
     /* intervals */
     int profiling_thread_interval;

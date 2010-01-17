@@ -62,7 +62,9 @@ struct hvfs_txg *txg_alloc(void)
     xlock_init(&t->ckpt_lock);
     xlock_init(&t->delta_lock);
     xlock_init(&t->itb_lock);
+    xlock_init(&t->ccb_lock);
     INIT_LIST_HEAD(&t->dirty_list);
+    INIT_LIST_HEAD(&t->ccb_list);
 
     return t;
 }
@@ -199,6 +201,18 @@ void txg_changer(time_t t)
     }
 }
 
+/* txg_trigger_ccb()
+ */
+void txg_trigger_ccb(struct hvfs_txg *txg)
+{
+    struct hvfs_tx *tx, *n;
+
+    list_for_each_entry_safe(tx, n, &txg->ccb_list, ccb) {
+        mds_tx_commit(tx);
+        list_del(&tx->ccb);
+    }
+}
+
 /* txg_commit()
  *
  * NOTE: this is the main function for commit thread
@@ -269,9 +283,11 @@ void *txg_commit(void *arg)
         }
         hmo.txg[TXG_WB] = NULL;
         /* free the TXG */
-        hvfs_info(mds, "TXG %ld is released (free:%d, clean:%d).\n", 
+        hvfs_info(mds, "TXG %lld is released (free:%d, clean:%d).\n", 
                   t->txg, freed, clean);
         mcond_destroy(&t->cond);
+        /* trigger the commit callback on the TXs */
+        txg_trigger_ccb(t);
         xfree(t);
     retry:
         ;

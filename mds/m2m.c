@@ -50,7 +50,7 @@ void mds_send_reply(struct xnet_msg *msg, struct hvfs_md_reply *hmr,
     xnet_msg_fill_tx(rpy, XNET_MSG_RPY, XNET_NEED_DATA_FREE, hmo.site_id,
                      msg->tx.ssite_id);
     xnet_msg_fill_reqno(rpy, msg->tx.reqno);
-    xnet_msg_fill_cmd(rpy, XNET_RPY_ACK | XNET_RPY_DATA);
+    xnet_msg_fill_cmd(rpy, XNET_RPY_DATA);
 
     if (xnet_send(hmo.xc, rpy)) {
         hvfs_err(mds, "xnet_send() failed\n");

@@ -45,7 +45,8 @@ void dump_profiling(time_t t)
               atomic64_read(&hmo.prof.cbht.buckets),
               HVFS_COLOR_END,
               atomic64_read(&hmo.prof.cbht.depth));
-    hvfs_info(mds, "|  ITB Prof: cowed %ld\n",
-              atomic64_read(&hmo.prof.itb.cowed));
+    hvfs_info(mds, "|  ITB Prof: cowed %ld, async_unlink %ld\n",
+              atomic64_read(&hmo.prof.itb.cowed),
+              atomic64_read(&hmo.prof.itb.async_unlink));
     hvfs_info(mds, "-- ITC Prof: ftx %d\n", atomic_read(&hmo.txc.ftx));
 }

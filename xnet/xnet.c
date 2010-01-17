@@ -46,6 +46,9 @@ struct xnet_msg *xnet_alloc_msg(u8 alloc_flag)
         return NULL;
     }
 
+#ifdef USE_XNET_SIMPLE
+    sem_init(&msg->event, 0, 0);
+#endif
     return msg;
 }
 

@@ -262,10 +262,10 @@ int mds_init(int bdepth)
     /* FIXME: configations */
     dconf_init();
     hmo.conf.profiling_thread_interval = 5;
-    hmo.conf.txg_interval = 0;
+    hmo.conf.txg_interval = 3;
     hmo.conf.option = HVFS_MDS_ITB_RWLOCK;
     hmo.conf.max_async_unlink = 100;
-    hmo.conf.unlink_interval = 1;
+    hmo.conf.unlink_interval = 2;
     hmo.conf.txc_hash_size = 1024;
     hmo.conf.txc_ftx = 0;
     hmo.conf.cbht_bucket_depth = bdepth;
@@ -309,6 +309,11 @@ int mds_init(int bdepth)
     if (err)
         goto out_cbht;
 
+    /* FIXME: init the ITB cache */
+    err = itb_cache_init(&hmo.ic, hmo.conf.itb_cache);
+    if (err)
+        goto out_itb;
+
     /* FIXME: init the local async unlink thead */
     err = unlink_thread_init();
     if (err)
@@ -324,6 +329,7 @@ int mds_init(int bdepth)
     hmo.state = HMO_STATE_RUNNING;
 
 out_unlink:
+out_itb:
 out_cbht:
 out_tx:
 out_dh:
@@ -347,6 +353,12 @@ void mds_destroy(void)
     /* stop the unlink thread */
     unlink_thread_destroy();
 
+    /* cbht */
+    mds_cbht_destroy(&hmo.cbht);
+    
+    /* itb */
+    itb_cache_destroy(&hmo.ic);
+    
     /* stop the commit threads */
     mds_destroy_tx();
 

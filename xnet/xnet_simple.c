@@ -128,6 +128,7 @@ int __xnet_handle_tx(int fd)
         return next;
     }
 
+    msg->state = XNET_MSG_RX;
     /* receive the tx */
     br = 0;
     do {
@@ -153,7 +154,7 @@ int __xnet_handle_tx(int fd)
         br += bt;
     } while (br < sizeof(struct xnet_msg_tx));
 
-    hvfs_debug(xnet, "We have recieved the MSG_TX, dpayload %d\n", msg->tx.len);
+    hvfs_debug(xnet, "We have recieved the MSG_TX, dpayload %lld\n", msg->tx.len);
 
     /* receive the data if exists */
     if (msg->tx.len) {
@@ -202,11 +203,20 @@ int __xnet_handle_tx(int fd)
             xc->ops.recv_handler(msg);
     } else if (msg->tx.type == XNET_MSG_RPY) {
         /* we should find the original request by handle */
-        hvfs_debug(xnet, "We got a RPY message, handle to msg %p\n", 
-                   (void *)msg->tx.handle);
+        hvfs_debug(xnet, "We got a RPY(%llx) message, handle to msg %p\n", 
+                   msg->tx.cmd, (void *)msg->tx.handle);
         req = (struct xnet_msg *)msg->tx.handle;
-        req->pair = msg;
+        msg->state = XNET_MSG_PAIRED;
 
+        /* switch for REPLY/ACK/COMMIT */
+        if (msg->tx.cmd == XNET_RPY_DATA) {
+            req->state = XNET_MSG_ACKED;
+            req->pair = msg;
+        } else if (msg->tx.cmd == XNET_RPY_COMMIT) {
+            req->state = XNET_MSG_COMMITED;
+        } else {
+            ASSERT(0, xnet);
+        }
         sem_post(&req->event);
     } else if (msg->tx.type == XNET_MSG_CMD) {
         /* just receive the data */
@@ -445,9 +455,9 @@ int xnet_update_ipaddr(u64 site_id, int argc, char *ipaddr[], short port[])
     }
     
     for (i = 0; i < argc; i++) {
-        inet_aton(ipaddr[i], &((struct sockaddr_in *)&(xa->sa))->sin_addr);
-        ((struct sockaddr_in *)&(xa->sa))->sin_family = AF_INET;
-        ((struct sockaddr_in *)&(xa->sa))->sin_port = htons(port[i]);
+        inet_aton(ipaddr[i], &((struct sockaddr_in *)&((xa + i)->sa))->sin_addr);
+        ((struct sockaddr_in *)&((xa + i)->sa))->sin_family = AF_INET;
+        ((struct sockaddr_in *)&((xa + i)->sa))->sin_port = htons(port[i]);
     }
 
     /* set the local flag now */
@@ -680,11 +690,12 @@ retry:
 
     /* then, send the data region */
     if (msg->siov_ulen) {
-        hvfs_debug(xnet, "There is some data to send ...\n");
+        hvfs_err(xnet, "There is some data to send (iov_len %d) len %d...\n",
+                   msg->siov_ulen, msg->tx.len);
         int i;
         for (i = 0; i < msg->siov_ulen; i++) {
+            bw = 0;
             do {
-                bw = 0;
                 bt = write(xa->sockfd, msg->siov[i].iov_base + bw, 
                            msg->siov[i].iov_len - bw);
                 if (bt < 0) {
@@ -695,7 +706,7 @@ retry:
                     goto out;
                 }
                 bw += bt;
-            } while (bt < msg->siov[i].iov_len);
+            } while (bw < msg->siov[i].iov_len);
         }
     }
 
@@ -703,7 +714,6 @@ retry:
 
     /* finally, we wait for the reply msg */
     if (msg->tx.flag & XNET_NEED_REPLY) {
-        sem_init(&msg->event, 0, 0);
     rewait:
         err = sem_wait(&msg->event);
         if (err < 0) {

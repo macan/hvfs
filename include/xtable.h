@@ -140,8 +140,8 @@ struct itbitmap
 #define BITMAP_END      0x80    /* means there is no slice after this slice */
     u64 flag:8;
     u64 ts;
-#define XTABLE_BITMAP_SIZE      (128 * 1024 * 1024)
-    u8 array[XTABLE_BITMAP_SIZE];
+#define XTABLE_BITMAP_SIZE      (128 * 1024) /* default is 128K */
+    u8 array[XTABLE_BITMAP_SIZE / sizeof(u8)];
 };
 
 struct checkpoint 

@@ -36,6 +36,7 @@
 #include "hvfs_common.h"
 #include "hvfs_const.h"
 #include "xhash.h"
+#include "site.h"
 
 /* This section for HVFS cmds & reqs */
 /* Client to MDS */

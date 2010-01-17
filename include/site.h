@@ -55,4 +55,16 @@
 
 #define HVFS_IS_ROOT(site) (((site & HVFS_SITE_TYPE_MASK) >> 17) == \
                             HVFS_SITE_TYPE_ROOT)
+
+#define HVFS_SITE_N_MASK        ((1 << 17) - 1)
+
+#define HVFS_CLIENT(n) ((HVFS_SITE_TYPE_CLIENT << 17) | (n & HVFS_SITE_N_MASK))
+
+#define HVFS_MDS(n) ((HVFS_SITE_TYPE_MDS << 17) | (n & HVFS_SITE_N_MASK))
+
+#define HVFS_MDSL(n) ((HVFS_SITE_TYPE_MDSL << 17) | (n & HVFS_SITE_N_MASK))
+
+#define HVFS_RING(n) ((HVFS_SITE_TYPE_RING << 17) | (n & HVFS_SITE_N_MASK))
+
+#define HVFS_ROOT(n) ((HVFS_SITE_TYPE_ROOT << 17) | (n & HVFS_SITE_N_MASK))
 #endif

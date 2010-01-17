@@ -32,6 +32,21 @@ static inline u64 mds_rdtx()
     return atomic64_inc_return(&hmi.mi_tx);
 }
 
+/* mds_tx_fix_ccb()
+ *
+ * Note: this function fix the relationship between TX and TXG on COMMIT
+ * requests.
+ */
+static inline
+void mds_tx_fix_ccb(struct hvfs_tx *tx)
+{
+    if (tx->op == HVFS_TX_NORMAL) {
+        if (list_empty(&tx->ccb)) {
+            list_add_tail(&tx->ccb, &tx->txg->ccb_list);
+        }
+    }
+}
+
 struct hvfs_tx *mds_alloc_tx(u16 op, struct xnet_msg *req)
 {
     struct hvfs_tx *tx;
@@ -58,10 +73,12 @@ init_tx:
     atomic_set(&tx->ref, 1);
     INIT_LIST_HEAD(&tx->lru);
     INIT_LIST_HEAD(&tx->tx_list);
+    INIT_LIST_HEAD(&tx->ccb);
     INIT_HLIST_NODE(&tx->hlist);
 
     /* FIXME: insert in the TXC */
     mds_txc_add(&hmo.txc, tx);
+    mds_tx_fix_ccb(tx);
     /* FIXME: tx_list? */
 
     return tx;
@@ -296,6 +313,37 @@ int mds_txc_evict(struct hvfs_txc *txc, struct hvfs_tx *tx)
     return 0;
 }
 
+/* __tx_send_commit_msg()
+ *
+ * NOTE: send the commit msg to the source site to release the TXs
+ */
+static inline
+void __tx_send_commit_msg(struct hvfs_tx *tx)
+{
+    struct xnet_msg *msg;
+
+    msg = xnet_alloc_msg(XNET_MSG_CACHE);
+    if (!msg) {
+        hvfs_warning(mds, "xnet_alloc_msg() faield\n");
+        /* do not retry myself */
+        return;
+    }
+    xnet_msg_fill_tx(msg, XNET_MSG_RPY, 0, hmo.site_id,
+                     tx->reqin_site);
+    xnet_msg_fill_reqno(msg, tx->req->tx.reqno);
+    xnet_msg_fill_cmd(msg, XNET_RPY_COMMIT, 0, 0);
+    msg->tx.handle = tx->req->tx.handle;
+
+    hvfs_err(mds, "SEND COMMIT to site %lld for reqno %lld\n",
+             tx->reqin_site, tx->reqno);
+    xnet_wait_group_add(mds_gwg, msg);
+    if (xnet_isend(hmo.xc, msg)) {
+        hvfs_err(mds, "xnet_isend() failed\n");
+        /* do not retry myself, client is forced to retry */
+        xnet_wait_group_del(mds_gwg, msg);
+    }
+}
+
 /*
  * NOTE: you should got the TX yourself!
  */
@@ -360,6 +408,8 @@ void mds_tx_commit(struct hvfs_tx *tx)
         return;
 
     if (tx->op == HVFS_TX_NORMAL) {
+        /* try to send the commit msg to source site */
+        __tx_send_commit_msg(tx);
         xlock_lock(&hmo.txc.lock);
         ASSERT(list_empty(&tx->lru), mds);
         list_add_tail(&tx->lru, &hmo.txc.lru);

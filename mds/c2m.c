@@ -46,23 +46,31 @@ void mds_send_reply(struct hvfs_tx *tx, struct hvfs_md_reply *hmr,
         return;
     }
 
+    hvfs_err(mds, "Send REPLY(err %d) to %lld: hmr->len %d, hmr->flag 0x%x\n", 
+               err, tx->reqin_site, hmr->len, hmr->flag);
     hmr->err = err;
     if (!hmr->err) {
-        xnet_msg_add_sdata(tx->rpy, hmr, sizeof(hmr));
+        xnet_msg_add_sdata(tx->rpy, hmr, sizeof(*hmr));
         if (hmr->len)
             xnet_msg_add_sdata(tx->rpy, hmr->data, hmr->len);
     } else {
         /* we should change the TX to the FORGET level */
         tx->op = HVFS_TX_FORGET;
         xnet_msg_set_err(tx->rpy, hmr->err);
+        /* then, we should free the hmr and any allocated buffers */
+        if (hmr->data)
+            xfree(hmr->data);
+        xfree(hmr);
     }
         
     xnet_msg_fill_tx(tx->rpy, XNET_MSG_RPY, XNET_NEED_DATA_FREE, hmo.site_id,
                      tx->reqin_site);
     xnet_msg_fill_reqno(tx->rpy, tx->req->tx.reqno);
-    xnet_msg_fill_cmd(tx->rpy, XNET_RPY_ACK | XNET_RPY_DATA, 0, 0);
+    xnet_msg_fill_cmd(tx->rpy, XNET_RPY_DATA, 0, 0);
     /* match the original request at the source site */
     tx->rpy->tx.handle = tx->req->tx.handle;
+
+    mds_tx_done(tx);
 
     xnet_wait_group_add(mds_gwg, tx->rpy);
     if (xnet_isend(hmo.xc, tx->rpy)) {
@@ -72,7 +80,7 @@ void mds_send_reply(struct hvfs_tx *tx, struct hvfs_md_reply *hmr,
         /* FIXME: should we free the tx->rpy? */
     }
     /* FIXME: state machine of TX, MSG */
-    mds_tx_done(tx);
+    mds_tx_reply(tx);
 }
 
 /* STATFS */
@@ -102,7 +110,11 @@ void mds_statfs(struct hvfs_tx *tx)
     xnet_msg_fill_tx(tx->rpy, XNET_MSG_RPY, XNET_NEED_DATA_FREE, hmo.site_id,
                      tx->reqin_site);
     xnet_msg_fill_reqno(tx->rpy, tx->req->tx.reqno);
-    xnet_msg_fill_cmd(tx->rpy, XNET_RPY_ACK | XNET_RPY_DATA, 0, 0);
+    xnet_msg_fill_cmd(tx->rpy, XNET_RPY_DATA, 0, 0);
+    /* match the original request at the source site */
+    tx->rpy->tx.handle = tx->req->tx.handle;
+
+    mds_tx_done(tx);
 
     xnet_wait_group_add(mds_gwg, tx->rpy);
     if (xnet_isend(hmo.xc, tx->rpy)) {
@@ -111,7 +123,7 @@ void mds_statfs(struct hvfs_tx *tx)
         xnet_wait_group_del(mds_gwg, tx->rpy);
     }
     /* FIXME: state machine of TX, MSG */
-    mds_tx_done(tx);
+    mds_tx_reply(tx);
 }
 
 /* LOOKUP */
@@ -206,7 +218,7 @@ void mds_create(struct hvfs_tx *tx)
     }
 
     /* create in the CBHT */
-    hi->flag |= INDEX_CREATE;
+    hi->flag |= INDEX_CREATE | INDEX_BY_NAME;
     if (!hi->dlen) {
         /* we may got zero payload create */
         hi->data = NULL;

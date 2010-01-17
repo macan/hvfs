@@ -57,7 +57,7 @@ int dh_insert(u64 uuid)
         hvfs_err(mds, "mds_dh_insert() failed %ld\n", PTR_ERR(e));
         goto out;
     }
-    hvfs_info(mds, "Insert dir:%8ld in DH w/  %p\n", uuid, e);
+    hvfs_info(mds, "Insert dir:%8lld in DH w/  %p\n", uuid, e);
 out:
     return err;
 }
@@ -73,7 +73,7 @@ int dh_search(u64 uuid)
         err = PTR_ERR(e);
         goto out;
     }
-    hvfs_info(mds, "Search dir:%8ld in DH hit %p\n", uuid, e);
+    hvfs_info(mds, "Search dir:%8lld in DH hit %p\n", uuid, e);
 out:
     return err;
 }

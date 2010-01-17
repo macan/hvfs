@@ -993,7 +993,7 @@ retry:
             memcpy(data, &(itb->ite[ii->entry].g), HVFS_MDU_SIZE);
         } else if (unlikely(hi->flag & INDEX_CREATE)) {
             /* already exist, so... */
-            if (!hi->flag & INDEX_CREATE_FORCE) {
+            if (!(hi->flag & INDEX_CREATE_FORCE)) {
                 /* should return -EEXIST */
                 ret = -EEXIST;
                 goto out;
@@ -1311,6 +1311,7 @@ void *async_unlink_local(void *arg)
     pthread_sigmask(SIG_BLOCK, &set, NULL);
 
     while (!hmo.unlink_thread_stop) {
+        dc = 0;
         err = sem_wait(&hmo.unlink_sem);
         if (err == EINTR)
             continue;

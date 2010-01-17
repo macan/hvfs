@@ -64,8 +64,8 @@ struct xnet_msg
 #define XNET_MSG_SENT           2
 #define XNET_MSG_ACKED          3
 #define XNET_MSG_COMMITED       4
-#define XNET_RX                 5
-#define XNET_PAIRED             6
+#define XNET_MSG_RX             5
+#define XNET_MSG_PAIRED         6
     u8 state;
 #define XNET_MSG_NORMAL         0x01 /* normal allocation */
 #define XNET_MSG_CACHE          0x02 /* allocation based on cache */

@@ -44,7 +44,8 @@ struct hvfs_tx
     struct hvfs_txg *txg;
     struct list_head tx_list;   /* tx list for current session */
     struct list_head lru;       /* linked in the LRU list */
-    struct hlist_node hlist;     /* linked in the txc */
+    struct list_head ccb;       /* commit callback list */
+    struct hlist_node hlist;    /* linked in the txc */
 };
 
 struct hvfs_txc 

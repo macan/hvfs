@@ -54,7 +54,7 @@ void hmr_print(struct hvfs_md_reply *hmr)
     if (!p)
         return;
     hi = (struct hvfs_index *)p;
-    hvfs_info(xnet, "hmr-> HI: len %d, flag 0x%x, uuid %lld, hash %lld, itbid %lld, "
+    hvfs_info(xnet, "hmr-> HI: namelen %d, flag 0x%x, uuid %lld, hash %lld, itbid %lld, "
               "puuid %lld, psalt %lld\n", hi->namelen, hi->flag, hi->uuid, hi->hash,
               hi->itbid, hi->puuid, hi->psalt);
     p += sizeof(struct hvfs_index);
@@ -76,6 +76,205 @@ void hmr_print(struct hvfs_md_reply *hmr)
     if (hmr->flag & MD_REPLY_WITH_BITMAP) {
         hvfs_info(xnet, "hmr-> BM: ...\n");
     }
+}
+
+/* get_send_msg_create()
+ */
+int get_send_msg_create(int dsite, int nid, u64 puuid, u64 itbid, u64 flag, 
+                        struct mdu_update* imu)
+{
+    char name[HVFS_MAX_NAME_LEN];
+    size_t dpayload;
+    struct xnet_msg *msg;
+    struct hvfs_index *hi;
+    struct hvfs_md_reply *hmr;
+    struct mdu_update *mu;
+    int err = 0;
+
+    /* construct the hvfs_index */
+    memset(name, 0, sizeof(name));
+    snprintf(name, HVFS_MAX_NAME_LEN, "mds-xnet-test-%d", nid);
+    dpayload = sizeof(struct hvfs_index) + strlen(name) + 
+        (imu ? sizeof(struct mdu_update) : 0);
+    hi = (struct hvfs_index *)xzalloc(dpayload);
+    if (!hi) {
+        hvfs_err(xnet, "xzalloc() hvfs_index failed\n");
+        return -ENOMEM;
+    }
+    hi->hash = hvfs_hash(puuid, (u64)name, strlen(name), HASH_SEL_EH);
+    hi->puuid = puuid;
+    hi->itbid = itbid;
+    hi->flag = flag;
+    memcpy(hi->name, name, strlen(name));
+    hi->namelen = strlen(name);
+    if (imu) {
+        mu = (struct mdu_update *)((void *)hi + sizeof(struct hvfs_index) +
+                                   strlen(name));
+        memcpy(mu, imu, sizeof(struct mdu_update));
+        /* The following line is very IMPORTANT! */
+        hi->dlen = sizeof(struct mdu_update);
+    }
+
+    /* alloc one msg and send it to the peer site */
+    msg = xnet_alloc_msg(XNET_MSG_NORMAL);
+    if (!msg) {
+        hvfs_err(xnet, "xnet_alloc_msg() failed\n");
+        err = -ENOMEM;
+        goto out;
+    }
+    xnet_msg_fill_tx(msg, XNET_MSG_REQ, XNET_NEED_DATA_FREE |
+                     XNET_NEED_REPLY | XNET_NEED_TX, hmo.xc->site_id, dsite);
+    xnet_msg_fill_cmd(msg, HVFS_CLT2MDS_CREATE, 0, 0);
+    xnet_msg_add_sdata(msg, hi, dpayload);
+
+    hvfs_debug(xnet, "MDS dpayload %lld (namelen %d, dlen %lld)\n", 
+               msg->tx.len, hi->namelen, hi->dlen);
+    err = xnet_send(hmo.xc, msg);
+    if (err) {
+        hvfs_err(xnet, "xnet_send() failed\n");
+        goto out_msg;
+    }
+    /* this means we have got the reply, parse it! */
+    ASSERT(msg->pair, xnet);
+    if (msg->pair->tx.err) {
+        hvfs_err(xnet, "CREATE failed @ MDS site %lld w/ %d\n",
+                 msg->pair->tx.ssite_id, msg->pair->tx.err);
+        err = msg->pair->tx.err;
+        goto out_msg;
+    }
+    if (msg->pair->xm_datacheck)
+        hmr = (struct hvfs_md_reply *)msg->pair->xm_data;
+    else {
+        hvfs_err(xnet, "Invalid CREATE reply from site %lld.\n",
+                 msg->pair->tx.ssite_id);
+        err = -EFAULT;
+        goto out;
+    }
+    /* now, checking the hmr err */
+    if (hmr->err) {
+        /* hoo, sth wrong on the MDS. IMPOSSIBLE code path! */
+        hvfs_err(xnet, "MDS Site %lld reply w/ %d\n",
+                 msg->pair->tx.ssite_id, hmr->err);
+        xnet_set_auto_free(msg->pair);
+        goto out_msg;
+    } else if (hmr->len) {
+        hmr->data = ((void *)hmr) + sizeof(struct hvfs_md_reply);
+    }
+    /* ok, we got the correct respond, dump it */
+    hmr_print(hmr);
+    /* finally, we wait for the commit respond */
+    if (msg->tx.flag & XNET_NEED_TX) {
+    rewait:
+        err = sem_wait(&msg->event);
+        if (err < 0) {
+            if (errno == EINTR)
+                goto rewait;
+            else
+                hvfs_err(xnet, "sem_wait() failed %d\n", errno);
+        }
+    }
+    xnet_set_auto_free(msg->pair);
+    
+out_msg:
+    xnet_free_msg(msg);
+    return err;
+out:
+    xfree(hi);
+    return err;
+}
+
+/* get_send_msg_unlink()
+ */
+int get_send_msg_unlink(int dsite, int nid, u64 puuid, u64 itbid, u64 flag)
+{
+    char name[HVFS_MAX_NAME_LEN];
+    size_t dpayload;
+    struct xnet_msg *msg;
+    struct hvfs_index *hi;
+    struct hvfs_md_reply *hmr;
+    int err = 0;
+
+    /* construct the hvfs_index */
+    memset(name, 0, sizeof(name));
+    snprintf(name, HVFS_MAX_NAME_LEN, "mds-xnet-test-%d", nid);
+    dpayload = sizeof(struct hvfs_index) + strlen(name);
+    hi = (struct hvfs_index *)xzalloc(dpayload);
+    if (!hi) {
+        hvfs_err(xnet, "xzalloc() hvfs_index failed \n");
+        return -ENOMEM;
+    }
+    hi->hash = hvfs_hash(puuid, (u64)name, strlen(name), HASH_SEL_EH);
+    hi->puuid = puuid;
+    hi->itbid = itbid;
+    hi->flag = flag;
+    memcpy(hi->name, name, strlen(name));
+    hi->namelen = strlen(name);
+
+    /* alloc one msg and send it to the peer site */
+    msg = xnet_alloc_msg(XNET_MSG_NORMAL);
+    if (!msg) {
+        hvfs_err(xnet, "xnet_alloc_msg() failed\n");
+        err = -ENOMEM;
+        goto out;
+    }
+    xnet_msg_fill_tx(msg, XNET_MSG_REQ, XNET_NEED_DATA_FREE |
+                     XNET_NEED_REPLY, hmo.xc->site_id, dsite);
+    xnet_msg_fill_cmd(msg, HVFS_CLT2MDS_UNLINK, 0, 0);
+    xnet_msg_add_sdata(msg, hi, dpayload);
+
+    hvfs_debug(xnet, "MDS dpayload %lld (namelen %d, dlen %lld)\n",
+               msg->tx.len, hi->namelen, hi->dlen);
+    err = xnet_send(hmo.xc, msg);
+    if (err) {
+        hvfs_err(xnet, "xnet_send() failed\n");
+        goto out_msg;
+    }
+    /* this means we hvae got the reply, parse it! */
+    ASSERT(msg->pair, xnet);
+    if (msg->pair->tx.err) {
+        hvfs_err(xnet, "UNLINK failed @ MDS site %lld w/ %d\n",
+                 msg->pair->tx.ssite_id, msg->pair->tx.err);
+        err = msg->pair->tx.err;
+        goto out_msg;
+    }
+    if (msg->pair->xm_datacheck)
+        hmr = (struct hvfs_md_reply *)msg->pair->xm_data;
+    else {
+        hvfs_err(xnet, "Invalid UNLINK reply from site %lld.\n",
+                 msg->pair->tx.ssite_id);
+        err = -EFAULT;
+        goto out;
+    }
+    /* now, checking the hmr err */
+    if (hmr->err) {
+        /* hoo, sth wrong on the MDS. IMPOSSIBLE code path! */
+        hvfs_err(xnet, "MDS Site %lld reply w/ %d\n",
+                 msg->pair->tx.ssite_id, hmr->err);
+        xnet_set_auto_free(msg->pair);
+        goto out_msg;
+    } else if (hmr->len) {
+        hmr->data = ((void *)hmr) + sizeof(struct hvfs_md_reply);
+    }
+    /* ok, we got the correct respond, dump it */
+    hmr_print(hmr);
+    /* FIXME: wait for the commit respond */
+    if (msg->tx.flag & XNET_NEED_TX) {
+    rewait:
+        err = sem_wait(&msg->event);
+        if (err < 0) {
+            if (errno == EINTR)
+                goto rewait;
+            else
+                hvfs_err(xnet, "sem_wait() failed %d\n", errno);
+        }
+    }
+    xnet_set_auto_free(msg->pair);
+out_msg:
+    xnet_free_msg(msg);
+    return err;
+out:
+    xfree(hi);
+    return err;
 }
 
 /**
@@ -111,21 +310,22 @@ int get_send_msg_lookup(int dsite, int nid, u64 puuid, u64 itbid, u64 flag)
     if (!msg) {
         hvfs_err(xnet, "xnet_alloc_msg() failed\n");
         err = -ENOMEM;
-        goto out;
+        goto out_free;
     }
 
     xnet_msg_fill_tx(msg, XNET_MSG_REQ, XNET_NEED_DATA_FREE |
-                     XNET_NEED_REPLY, !dsite, dsite);
+                     XNET_NEED_REPLY, hmo.xc->site_id, dsite);
     xnet_msg_fill_cmd(msg, HVFS_CLT2MDS_LOOKUP, 0, 0);
     xnet_msg_add_sdata(msg, hi, dpayload);
 
-    hvfs_debug(xnet, "MSG dpayload %lld\n", msg->tx.len);
+    hvfs_debug(xnet, "MSG dpayload %lld (namelen %d, dlen %lld)\n", 
+               msg->tx.len, hi->namelen, hi->dlen);
     err = xnet_send(hmo.xc, msg);
     if (err) {
         hvfs_err(xnet, "xnet_send() failed\n");
         goto out;
     }
-    /* this means we have got the repy, parse it! */
+    /* this means we have got the reply, parse it! */
     ASSERT(msg->pair, xnet);
     if (msg->pair->tx.err) {
         hvfs_err(xnet, "LOOKUP failed @ MDS site %lld w/ %d\n",
@@ -148,18 +348,27 @@ int get_send_msg_lookup(int dsite, int nid, u64 puuid, u64 itbid, u64 flag)
                  msg->pair->tx.ssite_id, hmr->err);
         xnet_set_auto_free(msg->pair);
         goto out;
+    } else if (hmr->len) {
+        hmr->data = ((void *)hmr) + sizeof(struct hvfs_md_reply);
     }
     /* ok, we got the correct respond, dump it */
     hmr_print(hmr);
     xnet_set_auto_free(msg->pair);
 out:
+    xnet_free_msg(msg);
+    return err;
+out_free:
+    xfree(hi);
     return err;
 }
 
 int msg_send(int dsite)
 {
-    return get_send_msg_lookup(dsite, 0, 0, 0,
-                               INDEX_LOOKUP | INDEX_BY_NAME | INDEX_ITE_ACTIVE);
+    get_send_msg_create(dsite, 0, 0, 0, INDEX_CREATE, NULL);
+    get_send_msg_lookup(dsite, 0, 0, 0,
+                        INDEX_LOOKUP | INDEX_BY_NAME | INDEX_ITE_ACTIVE);
+    get_send_msg_unlink(dsite, 0, 0, 0, INDEX_UNLINK | INDEX_BY_NAME);
+    return 0;
 }
 
 int msg_wait(int dsite)
@@ -178,34 +387,40 @@ int main(int argc, char *argv[])
         .recv_handler = mds_client_dispatch,
     };
     int err = 0;
-    int dsite;
+    int dsite, self;
     short port;
     
-    hvfs_info(xnet, "MDS w/ XNET Simple UNIT TESTing ...\n");
-
     if (argc == 2) {
+        /* Server Mode */
         port = 8210;
-        dsite = 0;
+        dsite = HVFS_CLIENT(0);
+        self = HVFS_MDS(0);
     } else {
+        /* Client Mode */
         port = 8412;
-        dsite = 1;
+        dsite = HVFS_MDS(0);
+        self = HVFS_CLIENT(0);
     }
     
+    hvfs_info(xnet, "MDS w/ XNET Simple UNIT TESTing Mode(%s)...\n",
+              (HVFS_IS_MDS(self) ? "Server" : "Client"));
+
     st_init();
     mds_init(10);
 
-    hmo.xc = xnet_register_type(0, port, !dsite, &ops);
+    hmo.xc = xnet_register_type(0, port, self, &ops);
     if (IS_ERR(hmo.xc)) {
         err = PTR_ERR(hmo.xc);
         goto out;
     }
 
-    xnet_update_ipaddr(0, 1, ipaddr1, port1);
-    xnet_update_ipaddr(1, 1, ipaddr2, port2);
+    xnet_update_ipaddr(HVFS_CLIENT(0), 1, ipaddr1, port1);
+    xnet_update_ipaddr(HVFS_MDS(0), 1, ipaddr2, port2);
 
     SET_TRACING_FLAG(xnet, HVFS_DEBUG);
+//    SET_TRACING_FLAG(mds, HVFS_DEBUG);
 
-    if (dsite)
+    if (HVFS_IS_CLIENT(self))
         msg_send(dsite);
     else
         msg_wait(dsite);
