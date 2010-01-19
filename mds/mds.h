@@ -218,7 +218,6 @@ void mds_get_tx(struct hvfs_tx *);
 void mds_put_tx(struct hvfs_tx *);
 int mds_init_txc(struct hvfs_txc *, int, int);
 int mds_destroy_txc(struct hvfs_txc *);
-struct hvfs_tx *mds_txc_alloc_tx(struct hvfs_txc *);
 int mds_txc_add(struct hvfs_txc *, struct hvfs_tx *);
 struct hvfs_tx *mds_txc_search(struct hvfs_txc *, u64, u64);
 int mds_txc_evict(struct hvfs_txc *, struct hvfs_tx *);

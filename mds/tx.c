@@ -47,6 +47,36 @@ void mds_tx_fix_ccb(struct hvfs_tx *tx)
     }
 }
 
+/* fast allocate TX in TXC lru list */
+static inline
+struct hvfs_tx *mds_txc_alloc_tx(struct hvfs_txc *txc)
+{
+    struct list_head *l = NULL;
+    struct hvfs_tx *tx = NULL;
+    
+    xlock_lock(&txc->lock);
+    if (atomic_read(&txc->ftx) > MDS_TXC_MAX_FREE) {
+        /* ok, we need to free some memory for other modules */
+    }
+    if (atomic_read(&txc->ftx) > 0) {
+        atomic_dec(&txc->ftx);
+        l = txc->lru.next;
+        ASSERT(l != &txc->lru, mds);
+        list_del_init(l);
+    }
+    xlock_unlock(&txc->lock);
+
+    if (l) {
+        /* remove from the TXC */
+        tx = list_entry(l, struct hvfs_tx, lru);
+        if (!hlist_unhashed(&tx->hlist)) {
+            hvfs_debug(mds, "Remove TX %p from the TXC.\n", tx);
+            mds_txc_evict(txc, tx);
+        }
+    }
+    return tx;
+}
+
 struct hvfs_tx *mds_alloc_tx(u16 op, struct xnet_msg *req)
 {
     struct hvfs_tx *tx;
@@ -187,35 +217,6 @@ int mds_destroy_txc(struct hvfs_txc *txc)
         xfree(txc->txht);
     atomic_set(&txc->ftx, 0);
     return 0;
-}
-
-/* fast allocate TX in TXC lru list */
-struct hvfs_tx *mds_txc_alloc_tx(struct hvfs_txc *txc)
-{
-    struct list_head *l = NULL;
-    struct hvfs_tx *tx = NULL;
-    
-    xlock_lock(&txc->lock);
-    if (atomic_read(&txc->ftx) > MDS_TXC_MAX_FREE) {
-        /* ok, we need to free some memory for other modules */
-    }
-    if (atomic_read(&txc->ftx) > 0) {
-        atomic_dec(&txc->ftx);
-        l = txc->lru.next;
-        ASSERT(l != &txc->lru, mds);
-        list_del_init(l);
-    }
-    xlock_unlock(&txc->lock);
-
-    if (l) {
-        /* remove from the TXC */
-        tx = list_entry(l, struct hvfs_tx, lru);
-        if (!hlist_unhashed(&tx->hlist)) {
-            hvfs_debug(mds, "Remove TX %p from the TXC.\n", tx);
-            mds_txc_evict(txc, tx);
-        }
-    }
-    return tx;
 }
 
 inline int mds_txc_hash(u64 site_id, u64 reqno, struct hvfs_txc *txc)

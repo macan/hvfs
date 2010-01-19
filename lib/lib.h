@@ -41,10 +41,13 @@ extern struct list_head glt;           /* global lock table */
 #define EXTRACT_BITMAP  0x80
 
 /* APIs */
+#define lib_timer_def() struct timeval begin, end
 void lib_timer_start(struct timeval *begin);
 void lib_timer_stop(struct timeval *end);
 void lib_timer_echo(struct timeval *begin, struct timeval *end, int loop);
+void lib_timer_echo_plus(struct timeval *begin, struct timeval *end, int loop, char *);
 void lib_timer_acc(struct timeval *, struct timeval *, double *);
+
 
 int lib_bitmap_tas(volatile void *, u32);
 int lib_bitmap_tac(volatile void *, u32);

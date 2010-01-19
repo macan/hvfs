@@ -1332,7 +1332,7 @@ void *async_unlink_local(void *arg)
             if (dc < hmo.conf.max_async_unlink)
                 break;
         }
-        hvfs_info(mds, "In this wave we unlink %d ITEs\n", dc);
+        hvfs_debug(mds, "In this wave we unlink %d ITEs\n", dc);
     }
 
     return ERR_PTR(err);

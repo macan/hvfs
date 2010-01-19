@@ -261,8 +261,8 @@ int mds_init(int bdepth)
 
     /* FIXME: configations */
     dconf_init();
-    hmo.conf.profiling_thread_interval = 5;
-    hmo.conf.txg_interval = 3;
+    hmo.conf.profiling_thread_interval = 0;
+    hmo.conf.txg_interval = 0;
     hmo.conf.option = HVFS_MDS_ITB_RWLOCK;
     hmo.conf.max_async_unlink = 100;
     hmo.conf.unlink_interval = 2;

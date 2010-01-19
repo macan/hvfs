@@ -23,6 +23,7 @@
 
 #include "hvfs.h"
 #include "xnet.h"
+#include "lib.h"
 
 /*
  * NOTE: this file is a simple single-host implementation of XNET. We use TCP
@@ -68,7 +69,39 @@ int pollin_thread_stop = 0;
 int global_reqno = 0;
 LIST_HEAD(global_xc_list);
 
+void setnodelay(int fd)
+{
+    int err = 0, val = 1;
+
+    err = setsockopt(fd, SOL_TCP, TCP_NODELAY, &val, sizeof(val));
+    if (err < 0) {
+        hvfs_err(xnet, "setsockopt() failed %d, the short messages may be "
+                 "very slow now\n", errno);
+    }
+}
+
 void setnonblocking(int fd)
+{
+    int err;
+
+    /* NOTE that: we found that the NONBLOCK Interface is not very good for
+     * our test case */
+    return;
+    err = fcntl(fd, F_GETFL);
+    if (err < 0) {
+        hvfs_err(xnet, "fcntl() GET failed %d\n", errno);
+        goto out;
+    }
+    err = fcntl(fd, F_SETFL, err | O_NONBLOCK);
+    if (err < 0) {
+        hvfs_err(xnet, "fcntl() SET failed %d\n", errno);
+        goto out;
+    }
+out:
+    return;
+}
+
+void unsetnonblocking(int fd)
 {
     int err;
 
@@ -77,7 +110,7 @@ void setnonblocking(int fd)
         hvfs_err(xnet, "fcntl() GET failed %d\n", errno);
         goto out;
     }
-    err = fcntl(fd, F_SETFL, err | O_NONBLOCK);
+    err = fcntl(fd, F_SETFL, (err & (~O_NONBLOCK)));
     if (err < 0) {
         hvfs_err(xnet, "fcntl() SET failed %d\n", errno);
         goto out;
@@ -120,6 +153,8 @@ int __xnet_handle_tx(int fd)
     int br, bt;
     int next = 1;               /* this means we should retry the read */
 
+    lib_timer_def();
+    lib_timer_start(&begin);
     msg = xnet_alloc_msg(XNET_MSG_NORMAL);
     if (!msg) {
         hvfs_err(xnet, "xnet_alloc_msg() failed\n");
@@ -128,8 +163,11 @@ int __xnet_handle_tx(int fd)
         return next;
     }
 
+    lib_timer_stop(&end);
+    lib_timer_echo_plus(&begin, &end, 1, "ALLOC XNET_MSG");
     msg->state = XNET_MSG_RX;
     /* receive the tx */
+    lib_timer_start(&begin);
     br = 0;
     do {
         bt = read(fd, ((void *)&msg->tx) + br, 
@@ -140,7 +178,8 @@ int __xnet_handle_tx(int fd)
                 next = 0;
                 goto out_free;
             }
-            hvfs_debug(xnet, "read() err %d\n", errno);
+            hvfs_err(xnet, "read() err %d w/ br %d(%d)\n", 
+                     errno, br, sizeof(struct xnet_msg_tx));
             if (errno == EAGAIN || errno == EINTR)
                 continue;
             /* FIXME: how to handle this err? */
@@ -153,6 +192,8 @@ int __xnet_handle_tx(int fd)
         }
         br += bt;
     } while (br < sizeof(struct xnet_msg_tx));
+    lib_timer_stop(&end);
+    lib_timer_echo_plus(&begin, &end, 1, "RECV TX");
 
     hvfs_debug(xnet, "We have recieved the MSG_TX, dpayload %lld\n", msg->tx.len);
 
@@ -166,13 +207,17 @@ int __xnet_handle_tx(int fd)
             goto out_free;
         }
         br = 0;
+    lib_timer_start(&begin);
         do {
             bt = read(fd, buf + br, msg->tx.len - br);
             if (bt < 0) {
-                if (errno == EAGAIN || errno == EINTR)
+                hvfs_debug(xnet, "read() err %d w/ br %d(%d)\n", 
+                         errno, br, msg->tx.len);
+                if (errno == EAGAIN || errno == EINTR) {
+                    sleep(0);
                     continue;
+                }
                 /* This means the connection is broken, let us failed */
-                hvfs_err(xnet, "read() err %d\n", errno);
                 next = -1;
                 goto out_free;
             } else if (bt == 0) {
@@ -181,12 +226,15 @@ int __xnet_handle_tx(int fd)
             }
             br += bt;
         } while (br < msg->tx.len);
+    lib_timer_stop(&end);
+    lib_timer_echo_plus(&begin, &end, 1, "RECV DATA");
 
         /* add the data to the riov */
         xnet_msg_add_rdata(msg, buf, br);
     }
     
     /* find the related msg */
+    lib_timer_start(&begin);
     if (msg->tx.type == XNET_MSG_REQ) {
         /* this is a fresh requst msg, just receive the data */
         struct xnet_context *xc;
@@ -214,6 +262,11 @@ int __xnet_handle_tx(int fd)
             req->pair = msg;
         } else if (msg->tx.cmd == XNET_RPY_COMMIT) {
             req->state = XNET_MSG_COMMITED;
+            /* auto free the commit msg */
+        } else if (msg->tx.cmd == XNET_RPY_ACK) {
+            req->state = XNET_MSG_ACKED;
+            /* auto free the ack msg */
+            req->pair = msg;
         } else {
             ASSERT(0, xnet);
         }
@@ -223,6 +276,8 @@ int __xnet_handle_tx(int fd)
     } else if (msg->tx.type == XNET_MSG_NOP) {
         hvfs_debug(xnet, "recv NOP message, just receive the next msg.\n");
     }
+    lib_timer_stop(&end);
+    lib_timer_echo_plus(&begin, &end, 1, "FIND RELATED MSG and handle the request");
 
     return next;
 out_free:
@@ -236,8 +291,14 @@ void *pollin_thread_main(void *arg)
     struct sockaddr_in addr = {0,};
     socklen_t addrlen = sizeof(struct sockaddr_in);
     struct accept_conn *ac;
+    sigset_t set;
     int asock, i;
     int err, nfds;
+    
+    /* first, let us block the SIGALRM */
+    sigemptyset(&set);
+    sigaddset(&set, SIGALRM);
+    pthread_sigmask(SIG_BLOCK, &set, NULL);
     
     memset(&ev, 0, sizeof(ev));
     ev.events = EPOLLIN;
@@ -275,6 +336,7 @@ void *pollin_thread_main(void *arg)
                 st_update_sockfd(&gst, &addr, asock);
                 
                 setnonblocking(asock);
+                setnodelay(asock);
                 ev.events = EPOLLIN | EPOLLET;
                 ev.data.fd = asock;
                 err = epoll_ctl(epfd, EPOLL_CTL_ADD, asock, &ev);
@@ -299,8 +361,12 @@ void *pollin_thread_main(void *arg)
                     st_clean_sockfd(&gst, events[i].data.fd);
                     continue;
                 }
+                lib_timer_def();
                 do {
+                    lib_timer_start(&begin);
                     next = __xnet_handle_tx(events[i].data.fd);
+                    lib_timer_stop(&end);
+                    lib_timer_echo_plus(&begin, &end, 1, "ONE handle tx");
                     if (next < 0) {
                         /* this means the connection is shutdown */
                         hvfs_debug(xnet, "connection %d is shutdown.\n",
@@ -309,7 +375,9 @@ void *pollin_thread_main(void *arg)
                         st_clean_sockfd(&gst, events[i].data.fd);
                         break;
                     }
-                } while (next);
+                } while (!next); /* if we have successfully handle one TX, then
+                                 * we out */
+                hvfs_info(xnet, "ONE TIME DONE.\n");
             }
         }
     }
@@ -630,6 +698,7 @@ retry:
                 st_update_sockfd(&gst, (struct sockaddr_in *)&xa->sa, csock);
                 
                 setnonblocking(csock);
+                setnodelay(csock);
                 ev.events = EPOLLIN | EPOLLET;
                 ev.data.fd = csock;
                 err = epoll_ctl(epfd, EPOLL_CTL_ADD, csock, &ev);
@@ -674,6 +743,9 @@ retry:
                msg->tx.ssite_id, msg->tx.dsite_id);
     
     /* send the msg tx by the selected connection */
+#if 1
+    lib_timer_def();
+    lib_timer_start(&begin);
     bw = 0;
     do {
         bt = write(xa->sockfd, ((void *)&msg->tx) + bw, 
@@ -687,12 +759,43 @@ retry:
         }
         bw += bt;
     } while (bw < sizeof(struct xnet_msg_tx));
+#else
+    bw = 0;
+    int len = sizeof(struct xnet_msg_tx);
+    void *buf;
+    if (msg->siov_ulen)
+        len += 100;
+    buf = xmalloc(len);
+    memcpy(buf, &msg->tx, sizeof(struct xnet_msg_tx));
+    do {
+        bt = write(xa->sockfd, buf + bw, len - bw);
+        if (bt < 0) {
+            hvfs_err(xnet, "write() err %d\n", errno);
+            if (errno == EINTR || errno == EAGAIN)
+                continue;
+            err = -errno;
+            goto out;
+        }
+        bw += bt;
+    } while (bw < len);
+#endif
 
     /* then, send the data region */
+#if 1
     if (msg->siov_ulen) {
-        hvfs_err(xnet, "There is some data to send (iov_len %d) len %d...\n",
+        hvfs_debug(xnet, "There is some data to send (iov_len %d) len %d...\n",
                    msg->siov_ulen, msg->tx.len);
         int i;
+        lib_timer_def();
+        lib_timer_start(&begin);
+        
+        bt = writev(xa->sockfd, msg->siov, msg->siov_ulen);
+        if (bt < 0) {
+            hvfs_err(xnet, "writev() err %d\n", errno);
+            err = -errno;
+            goto out;
+        }
+#if 0        
         for (i = 0; i < msg->siov_ulen; i++) {
             bw = 0;
             do {
@@ -708,8 +811,14 @@ retry:
                 bw += bt;
             } while (bw < msg->siov[i].iov_len);
         }
+#endif
+        lib_timer_stop(&end);
+        lib_timer_echo_plus(&begin, &end, 1, "SEND DATA PAYLOAD");
     }
+    lib_timer_stop(&end);
+    lib_timer_echo_plus(&begin, &end, 1, "TOTAL SEND");
 
+#endif
     hvfs_debug(xnet, "We have sent the msg %p\n", msg);
 
     /* finally, we wait for the reply msg */

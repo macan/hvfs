@@ -27,6 +27,8 @@
 
 void dump_profiling(time_t t)
 {
+    if (!hmo.conf.profiling_thread_interval)
+        return;
     if (t < hmo.prof.ts + hmo.conf.profiling_thread_interval) {
         return;
     }

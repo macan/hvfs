@@ -37,6 +37,15 @@ void lib_timer_stop(struct timeval *end)
     }
 }
 
+void lib_timer_echo_plus(struct timeval *begin, struct timeval *end, int loop, char *str)
+{
+    hvfs_debug(lib, "%ld %ld -> %ld %ld\n", begin->tv_sec, begin->tv_usec,
+               end->tv_sec, end->tv_usec);
+    hvfs_info(lib, "ECHO %s \t %lf us\n", str, 
+              ((end->tv_sec - begin->tv_sec) * 1000000.0 +
+               end->tv_usec - begin->tv_usec) / loop);
+}
+
 void lib_timer_echo(struct timeval *begin, struct timeval *end, int loop)
 {
     hvfs_debug(lib, "%ld %ld -> %ld %ld\n", begin->tv_sec, begin->tv_usec,

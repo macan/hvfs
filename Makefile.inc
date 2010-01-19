@@ -29,7 +29,7 @@ CFLAGS += -Wall -DCDATE="\"$(COMPILE_DATE)\"" \
 			-DCHOST="\"$(COMPILE_HOST)\"" -I$(INC_PATH) \
 			-I$(LIB_PATH) -I$(MDS) -D_GNU_SOURCE\
 			-DHVFS_TRACING -DHVFS_DEBUG_MEMORY -DHVFS_DEBUG_LOCK_ \
-            -D_USE_SPINLOCK_
+            -D_USE_SPINLOCK_ -DHVFS_DEBUG_LATENCY_
 LFLAGS += -lrt -lpthread
 
 # Region for depend files

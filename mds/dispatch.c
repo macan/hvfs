@@ -32,6 +32,10 @@ int mds_client_dispatch(struct xnet_msg *msg)
     struct hvfs_tx *tx;
     u16 op;
 
+#ifdef HVFS_DEBUG_LATENCY
+    lib_timer_def();
+    lib_timer_start(&begin);
+#endif
     if (msg->tx.flag & XNET_NEED_TX)
         op = HVFS_TX_NORMAL;    /* need tx(ack/rpy+commit) */
     else if (msg->tx.flag & XNET_NEED_REPLY)
@@ -74,6 +78,10 @@ int mds_client_dispatch(struct xnet_msg *msg)
     default:
         hvfs_err(mds, "Invalid client2MDS command: 0x%lx\n", msg->tx.cmd);
     }
+#ifdef HVFS_DEBUG_LATENCY
+    lib_timer_stop(&end);
+    lib_timer_echo_plus(&begin, &end, 1, "ALLOC TX and HANDLE.");
+#endif
     return 0;
 }
 

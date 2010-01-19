@@ -38,6 +38,10 @@ static inline
 void mds_send_reply(struct hvfs_tx *tx, struct hvfs_md_reply *hmr, 
                     int err)
 {
+#ifdef HVFS_DEBUG_LATENCY
+    struct timeval begin, end;
+    lib_timer_start(&begin);
+#endif
     tx->rpy = xnet_alloc_msg(XNET_MSG_CACHE);
     if (!tx->rpy) {
         hvfs_err(mds, "xnet_alloc_msg() failed\n");
@@ -46,7 +50,7 @@ void mds_send_reply(struct hvfs_tx *tx, struct hvfs_md_reply *hmr,
         return;
     }
 
-    hvfs_err(mds, "Send REPLY(err %d) to %lld: hmr->len %d, hmr->flag 0x%x\n", 
+    hvfs_debug(mds, "Send REPLY(err %d) to %lld: hmr->len %d, hmr->flag 0x%x\n", 
                err, tx->reqin_site, hmr->len, hmr->flag);
     hmr->err = err;
     if (!hmr->err) {
@@ -81,6 +85,10 @@ void mds_send_reply(struct hvfs_tx *tx, struct hvfs_md_reply *hmr,
     }
     /* FIXME: state machine of TX, MSG */
     mds_tx_reply(tx);
+#ifdef HVFS_DEBUG_LATENCY
+    lib_timer_stop(&end);
+    lib_timer_echo_plus(&begin, &end, 1, "REPLY");
+#endif
 }
 
 /* STATFS */
@@ -188,6 +196,10 @@ void mds_create(struct hvfs_tx *tx)
     struct hvfs_md_reply *hmr;
     int err;
 
+#ifdef HVFS_DEBUG_LATENCY
+    struct timeval begin, end;
+    lib_timer_start(&begin);
+#endif
     /* sanity checking */
     if (tx->req->tx.len < sizeof(*hi)) {
         hvfs_err(mds, "Invalid CREATE request %lld received\n", 
@@ -226,6 +238,10 @@ void mds_create(struct hvfs_tx *tx)
         hi->data = tx->req->xm_data + sizeof(*hi) + hi->namelen;
     err = mds_cbht_search(hi, hmr, tx->txg, &tx->txg);
 
+#ifdef HVFS_DEBUG_LATENCY
+    lib_timer_stop(&end);
+    lib_timer_echo_plus(&begin, &end, 1, "CREATE");
+#endif
 actually_send:
     return mds_send_reply(tx, hmr, err);
 send_rpy:

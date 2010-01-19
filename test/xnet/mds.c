@@ -93,7 +93,8 @@ int get_send_msg_create(int dsite, int nid, u64 puuid, u64 itbid, u64 flag,
 
     /* construct the hvfs_index */
     memset(name, 0, sizeof(name));
-    snprintf(name, HVFS_MAX_NAME_LEN, "mds-xnet-test-%d", nid);
+    snprintf(name, HVFS_MAX_NAME_LEN, "mds-xnet-test-%lld-%lld-%d", 
+             puuid, itbid, nid);
     dpayload = sizeof(struct hvfs_index) + strlen(name) + 
         (imu ? sizeof(struct mdu_update) : 0);
     hi = (struct hvfs_index *)xzalloc(dpayload);
@@ -123,7 +124,7 @@ int get_send_msg_create(int dsite, int nid, u64 puuid, u64 itbid, u64 flag,
         goto out;
     }
     xnet_msg_fill_tx(msg, XNET_MSG_REQ, XNET_NEED_DATA_FREE |
-                     XNET_NEED_REPLY | XNET_NEED_TX, hmo.xc->site_id, dsite);
+                     XNET_NEED_REPLY, hmo.xc->site_id, dsite);
     xnet_msg_fill_cmd(msg, HVFS_CLT2MDS_CREATE, 0, 0);
     xnet_msg_add_sdata(msg, hi, dpayload);
 
@@ -161,7 +162,7 @@ int get_send_msg_create(int dsite, int nid, u64 puuid, u64 itbid, u64 flag,
         hmr->data = ((void *)hmr) + sizeof(struct hvfs_md_reply);
     }
     /* ok, we got the correct respond, dump it */
-    hmr_print(hmr);
+//    hmr_print(hmr);
     /* finally, we wait for the commit respond */
     if (msg->tx.flag & XNET_NEED_TX) {
     rewait:
@@ -196,7 +197,8 @@ int get_send_msg_unlink(int dsite, int nid, u64 puuid, u64 itbid, u64 flag)
 
     /* construct the hvfs_index */
     memset(name, 0, sizeof(name));
-    snprintf(name, HVFS_MAX_NAME_LEN, "mds-xnet-test-%d", nid);
+    snprintf(name, HVFS_MAX_NAME_LEN, "mds-xnet-test-%lld-%lld-%d", 
+             puuid, itbid, nid);
     dpayload = sizeof(struct hvfs_index) + strlen(name);
     hi = (struct hvfs_index *)xzalloc(dpayload);
     if (!hi) {
@@ -256,7 +258,7 @@ int get_send_msg_unlink(int dsite, int nid, u64 puuid, u64 itbid, u64 flag)
         hmr->data = ((void *)hmr) + sizeof(struct hvfs_md_reply);
     }
     /* ok, we got the correct respond, dump it */
-    hmr_print(hmr);
+//    hmr_print(hmr);
     /* FIXME: wait for the commit respond */
     if (msg->tx.flag & XNET_NEED_TX) {
     rewait:
@@ -291,7 +293,8 @@ int get_send_msg_lookup(int dsite, int nid, u64 puuid, u64 itbid, u64 flag)
     int err = 0;
     
     memset(name, 0, sizeof(name));
-    snprintf(name, HVFS_MAX_NAME_LEN, "mds-xnet-test-%d", nid);
+    snprintf(name, HVFS_MAX_NAME_LEN, "mds-xnet-test-%lld-%lld-%d", 
+             puuid, itbid, nid);
     dpayload = sizeof(struct hvfs_index) + strlen(name);
     hi = (struct hvfs_index *)xzalloc(dpayload);
     if (!hi) {
@@ -347,12 +350,13 @@ int get_send_msg_lookup(int dsite, int nid, u64 puuid, u64 itbid, u64 flag)
         hvfs_err(xnet, "MDS Site %lld reply w/ %d\n", 
                  msg->pair->tx.ssite_id, hmr->err);
         xnet_set_auto_free(msg->pair);
+        err = hmr->err;
         goto out;
     } else if (hmr->len) {
         hmr->data = ((void *)hmr) + sizeof(struct hvfs_md_reply);
     }
     /* ok, we got the correct respond, dump it */
-    hmr_print(hmr);
+//    hmr_print(hmr);
     xnet_set_auto_free(msg->pair);
 out:
     xnet_free_msg(msg);
@@ -362,12 +366,63 @@ out_free:
     return err;
 }
 
-int msg_send(int dsite)
+int msg_send(int dsite, int loop)
 {
-    get_send_msg_create(dsite, 0, 0, 0, INDEX_CREATE, NULL);
-    get_send_msg_lookup(dsite, 0, 0, 0,
-                        INDEX_LOOKUP | INDEX_BY_NAME | INDEX_ITE_ACTIVE);
-    get_send_msg_unlink(dsite, 0, 0, 0, INDEX_UNLINK | INDEX_BY_NAME);
+    struct timeval begin, end;
+    int i, j, err;
+    u64 puuid = 0, itbid = 0;
+    
+    /* create many ites */
+    for (i = 0, j = 0; i < loop; i++) {
+        if (i >= (1 << ITB_DEPTH)) {
+            itbid++;
+            j = 0;
+        }
+        lib_timer_start(&begin);
+        err = get_send_msg_create(dsite, j++, puuid, itbid, 
+                                  INDEX_CREATE, NULL);
+        lib_timer_stop(&end);
+        lib_timer_echo(&begin, &end, 1);
+        if (err) {
+            hvfs_err(xnet, "create 'mds-xnet-test-%lld-%lld-%d' failed\n",
+                     puuid, itbid, (j - 1));
+        }
+    }
+
+    hvfs_info(xnet, "Create %d ITE(s) done.\n", loop);
+    
+    /* do lookup */
+    for (i = 0, j = 0; i < loop; i++) {
+        if (i >= (1 << ITB_DEPTH)) {
+            itbid++;
+            j = 0;
+        }
+        err = get_send_msg_lookup(dsite, j++, puuid, itbid,
+                                  INDEX_LOOKUP | INDEX_BY_NAME | INDEX_ITE_ACTIVE);
+        if (err) {
+            hvfs_err(xnet, "lookup 'mds-xnet-test-%lld-%lld-%d' failed\n",
+                     puuid, itbid, (j - 1));
+        }
+    }
+
+    hvfs_info(xnet, "Lookup %d ITE(s) done.\n", loop);
+
+    /* then delete them */
+    for (i = 0, j = 0; i < loop; i++) {
+        if (i >= (1 << ITB_DEPTH)) {
+            itbid++;
+            j = 0;
+        }
+        err = get_send_msg_unlink(dsite, j++, puuid, itbid, 
+                                  INDEX_UNLINK | INDEX_BY_NAME);
+        if (err) {
+            hvfs_err(xnet, "unlink 'mds-xnet-test-%lld-%lld-%d' failed\n",
+                     puuid, itbid, (j - 1));
+        }
+    }
+    
+    hvfs_info(xnet, "Unlink %d ITE(s) done.\n", loop);
+
     return 0;
 }
 
@@ -417,11 +472,11 @@ int main(int argc, char *argv[])
     xnet_update_ipaddr(HVFS_CLIENT(0), 1, ipaddr1, port1);
     xnet_update_ipaddr(HVFS_MDS(0), 1, ipaddr2, port2);
 
-    SET_TRACING_FLAG(xnet, HVFS_DEBUG);
+//    SET_TRACING_FLAG(xnet, HVFS_DEBUG);
 //    SET_TRACING_FLAG(mds, HVFS_DEBUG);
 
     if (HVFS_IS_CLIENT(self))
-        msg_send(dsite);
+        msg_send(dsite, 2);
     else
         msg_wait(dsite);
 

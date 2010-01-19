@@ -31,6 +31,7 @@ function cbht_unit_test() {
         total=7;
     fi
     loop=0;
+    return
     while [ $loop -lt $total ]; do
         case $loop in
             0) `$1 > /tmp/HVFS-$LOG_PATH/$log_name`;;
@@ -64,8 +65,8 @@ function xnet_unit_test() {
         return;
     fi
     echo -n "--> UNIT TEST s($program_name) Start ... "
-    `$1 > /tmp/HVFS-$LOG_PATH/${log_name}-0 &`
-    `$1 1 > /tmp/HVFS-$LOG_PATH/${log_name}-1`
+    `$1 1 > /tmp/HVFS-$LOG_PATH/${log_name}-1 &`
+    `$1 > /tmp/HVFS-$LOG_PATH/${log_name}-0`
     err=$?
     if [ $err -eq 0 ]; then
         echo -n "(1/2) done, "
@@ -74,16 +75,18 @@ function xnet_unit_test() {
         let test_failed=1
     fi
     # get the jobid
-    jobid=`jobs | grep ${program_name} | awk -F "[" '{print $2}' | awk -F "]" '{print 1}'`
+    JOBLINE=`jobs | grep "$program_name"`
+    JOBID=`echo $JOBLINE | awk -F "[" '{print $2}' | awk -F "]" '{print $1}'`
+    JOBERR=`echo $JOBLINE | awk '{print $3}'`
     if [ x$jobid == "x" ]; then
         echo "(2/2) done."
     else
         wait %$jobid
         err=$?
         if [ $err -eq 127 ]; then
-            echo "(2/2) done."
+            echo "(2/2) done+."
         elif [ $err -eq 0 ]; then
-            echo "(2/2) done."
+            echo "(2/2) done-."
         else
             echo "(2/2) failed $err."
         fi
