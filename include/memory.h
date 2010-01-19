@@ -102,7 +102,8 @@ static inline void *xrealloc(void *ptr, size_t size)
 static inline void *xzalloc(size_t size)
 {
     void *m = malloc(size);
-    memset(m, 0, size);
+    if (likely(m))
+        memset(m, 0, size);
     return m;
 }
 

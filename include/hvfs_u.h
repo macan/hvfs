@@ -41,6 +41,7 @@
 #include <execinfo.h>
 #include <semaphore.h>
 #include <sys/socket.h>
+#include <netinet/tcp.h>
 #include <sys/un.h>
 #include <sys/epoll.h>
 #include <netinet/in.h>

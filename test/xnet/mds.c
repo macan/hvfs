@@ -368,32 +368,33 @@ out_free:
 
 int msg_send(int dsite, int loop)
 {
-    struct timeval begin, end;
+    lib_timer_def();
     int i, j, err;
     u64 puuid = 0, itbid = 0;
     
     /* create many ites */
+    lib_timer_start(&begin);
     for (i = 0, j = 0; i < loop; i++) {
-        if (i >= (1 << ITB_DEPTH)) {
+        if (i && (i % (1 << ITB_DEPTH) == 0)) {
             itbid++;
             j = 0;
         }
-        lib_timer_start(&begin);
         err = get_send_msg_create(dsite, j++, puuid, itbid, 
                                   INDEX_CREATE, NULL);
-        lib_timer_stop(&end);
-        lib_timer_echo(&begin, &end, 1);
         if (err) {
             hvfs_err(xnet, "create 'mds-xnet-test-%lld-%lld-%d' failed\n",
                      puuid, itbid, (j - 1));
         }
     }
+    lib_timer_stop(&end);
+    lib_timer_echo_plus(&begin, &end, loop, "CREATE Latency: ");
 
     hvfs_info(xnet, "Create %d ITE(s) done.\n", loop);
     
     /* do lookup */
-    for (i = 0, j = 0; i < loop; i++) {
-        if (i >= (1 << ITB_DEPTH)) {
+    lib_timer_start(&begin);
+    for (i = 0, j = 0, itbid = 0; i < loop; i++) {
+        if (i && (i % (1 << ITB_DEPTH) == 0)) {
             itbid++;
             j = 0;
         }
@@ -404,22 +405,27 @@ int msg_send(int dsite, int loop)
                      puuid, itbid, (j - 1));
         }
     }
+    lib_timer_stop(&end);
+    lib_timer_echo_plus(&begin, &end, loop, "LOOKUP Latency: ");
 
     hvfs_info(xnet, "Lookup %d ITE(s) done.\n", loop);
 
     /* then delete them */
-    for (i = 0, j = 0; i < loop; i++) {
-        if (i >= (1 << ITB_DEPTH)) {
+    lib_timer_start(&begin);
+    for (i = 0, j = 0, itbid = 0; i < loop; i++) {
+        if (i && (i % (1 << ITB_DEPTH) == 0)) {
             itbid++;
             j = 0;
         }
         err = get_send_msg_unlink(dsite, j++, puuid, itbid, 
-                                  INDEX_UNLINK | INDEX_BY_NAME);
+                                  INDEX_UNLINK | INDEX_BY_NAME | INDEX_ITE_ACTIVE);
         if (err) {
             hvfs_err(xnet, "unlink 'mds-xnet-test-%lld-%lld-%d' failed\n",
                      puuid, itbid, (j - 1));
         }
     }
+    lib_timer_stop(&end);
+    lib_timer_echo_plus(&begin, &end, loop, "UNLINK Latency: ");
     
     hvfs_info(xnet, "Unlink %d ITE(s) done.\n", loop);
 
@@ -476,7 +482,7 @@ int main(int argc, char *argv[])
 //    SET_TRACING_FLAG(mds, HVFS_DEBUG);
 
     if (HVFS_IS_CLIENT(self))
-        msg_send(dsite, 2);
+        msg_send(dsite, 20000);
     else
         msg_wait(dsite);
 

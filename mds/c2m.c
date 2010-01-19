@@ -39,7 +39,7 @@ void mds_send_reply(struct hvfs_tx *tx, struct hvfs_md_reply *hmr,
                     int err)
 {
 #ifdef HVFS_DEBUG_LATENCY
-    struct timeval begin, end;
+    lib_timer_def();
     lib_timer_start(&begin);
 #endif
     tx->rpy = xnet_alloc_msg(XNET_MSG_CACHE);

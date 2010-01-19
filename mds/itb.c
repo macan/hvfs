@@ -137,6 +137,8 @@ long __itb_get_free_index(struct itb *i)
     xlock_lock(&i->h.ilock);
 #endif
     nr = i->h.inf;
+    if (nr >= (1 << i->h.adepth))
+        nr = 0;
     d = c = (1 << i->h.adepth);
 
     while (c) {
@@ -299,6 +301,8 @@ int itb_add_ite(struct itb *i, struct hvfs_index *hi, void *data)
     } else {
         /* already full, should split */
         /* FIXME: ITB SPLIT! */
+        atomic_dec(&i->h.entries);
+        hvfs_err(mds, "entries %d\n", atomic_read(&i->h.entries));
         err = -ESPLIT;
         goto out;
     }
@@ -373,7 +377,7 @@ void itb_del_ite(struct itb *i, struct ite *e, u64 offset, u64 pos)
                 break;
             if (pos == offset || hit) {
                 /* ok, we get the unlink target */
-                if (offset == prev) {
+                if (offset == saved) {
                     needswap = 1;
                     prev = offset;
                 } else if (ii->flag == ITB_INDEX_UNIQUE) {
@@ -469,6 +473,7 @@ void ite_create(struct hvfs_index *hi, struct ite *e)
         struct mdu_update *mu = (struct mdu_update *)hi->data;
 
         /* default fields */
+        memset(e, 0, sizeof(e));
         e->s.mdu.flags |= (HVFS_MDU_IF_NORMAL);
         if (e->flag == ITE_FLAG_SMALL)
             e->s.mdu.flags |= HVFS_MDU_IF_SMALL;
@@ -576,6 +581,12 @@ inline int ite_match(struct ite *e, struct hvfs_index *hi)
     if ((hi->flag & INDEX_ITE_ACTIVE) && ((e->flag & ITE_STATE_MASK) != ITE_ACTIVE))
         return ITE_MATCH_MISS;
     
+    /* we default to access the ACTIVE ite, the shadow ite is excluded! */
+    if (unlikely((e->flag & ITE_STATE_MASK) == ITE_UNLINKED)) {
+        if (!(hi->flag & INDEX_ITE_SHADOW))
+            return ITE_MATCH_MISS;
+    }
+
     if (hi->flag & INDEX_BY_UUID) {
         if (e->uuid == hi->uuid && e->hash == hi->hash) {
             return ITE_MATCH_HIT;
@@ -1199,21 +1210,25 @@ void async_unlink(time_t t)
 void async_unlink_ite(struct itb *i, int *dc)
 {
     u64 offset = 0;
-    u64 total = 1 << (i->h.adepth + 1);
+    u64 total = 1 << (i->h.adepth);
     atomic64_t *as;
     struct itb_index *ii;
     struct itb_lock *l;
     struct ite *e;
 
-    l = &i->lock[offset / ITB_LOCK_GRANULARITY];
-    itb_index_wlock(l);
     as = &hmo.prof.itb.async_unlink;
 
+    /* FIXME: we need to dirty the ITBs, it is a dirty work */
+
     while (offset < total) {
+        l = &i->lock[offset / ITB_LOCK_GRANULARITY];
+        itb_index_wlock(l);
+
         ii = &i->index[offset];
         if (ii->flag == ITB_INDEX_FREE) {
             /* this offset is a hole */
             offset++;
+            itb_index_wunlock(l);
             continue;
         }
         if (ii->flag == ITB_INDEX_UNIQUE) {
@@ -1223,6 +1238,7 @@ void async_unlink_ite(struct itb *i, int *dc)
                 __ite_unlink(i, offset);
                 (*dc)++;
                 atomic64_inc(as);
+                hvfs_debug(mds, "UNIQUE unlink w/ AU %ld\n", atomic64_read(as));
             }
         } else {
             /* this offset has at least two entries */
@@ -1239,10 +1255,11 @@ void async_unlink_ite(struct itb *i, int *dc)
                 if (ii->flag == ITB_INDEX_FREE)
                     break;
                 e = &i->ite[ii->entry];
-                hvfs_debug(mds, "e->flag %x\n", e->flag & ITE_STATE_MASK);
+                hvfs_debug(mds, "e->flag %x %ld\n", e->flag & ITE_STATE_MASK, 
+                           atomic64_read(&hmo.prof.itb.async_unlink));
                 if ((e->flag & ITE_STATE_MASK) == ITE_UNLINKED) {
                     hvfs_debug(mds, "prev %lld offset %lld\n", prev, offset);
-                    if (offset == prev) {
+                    if (offset == saved) {
                         /* unlink the head, and we know that there is a next
                          * entry. we must loop in the list and swap the first
                          * unlinked entry to this location */
@@ -1277,21 +1294,28 @@ void async_unlink_ite(struct itb *i, int *dc)
                     prev = offset;
                 }
                 offset = ii->conflict;
-            } while (offset < total && (!quit));
+            } while (offset < (total << 1) && (!quit));
             if (needswap) {
                 /* this means we need free the head now */
                 ii = &i->index[saved];
+                if (ii->flag !=  ITB_INDEX_UNIQUE) {
+                    hvfs_info(mds, "saved %lld\n", saved);
+                    itb_dump(i);
+                }
                 ASSERT(ii->flag == ITB_INDEX_UNIQUE, mds);
                 __ite_unlink(i, saved);
             }
             offset = saved;
         }
         offset++;
-        if (*dc >= hmo.conf.max_async_unlink)
+        itb_index_wunlock(l);
+        if (*dc >= hmo.conf.max_async_unlink) {
             break;
+        }
     }
 
-    itb_index_wunlock(l);
+    hvfs_debug(mds, "async unlink %d entries in ITB %lld.\n", 
+               *dc, i->h.itbid);
 }
 
 /* async_unlink_local()
@@ -1327,12 +1351,16 @@ void *async_unlink_local(void *arg)
                 continue;
             }
             /* hooray, let us deal with this itb */
+#if 0
+            itb_dump((struct itb *)ih);
+#endif
             async_unlink_ite((struct itb *)ih, &dc);
             xrwlock_runlock(&ih->lock);
-            if (dc < hmo.conf.max_async_unlink)
+            if (dc >= hmo.conf.max_async_unlink)
                 break;
         }
-        hvfs_debug(mds, "In this wave we unlink %d ITEs\n", dc);
+        if (dc)
+            hvfs_info(mds, "In this wave we unlink %d ITEs\n", dc);
     }
 
     return ERR_PTR(err);

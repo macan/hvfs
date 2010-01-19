@@ -77,6 +77,7 @@ struct mds_txg_prof
 
 struct mds_cbht_prof
 {
+    atomic64_t aitb;            /* # of active ITBs */
     atomic64_t lookup;          /* # of lookup */
     atomic64_t modify;          /* # of modify ops */
     atomic64_t split;           /* # of splits */
