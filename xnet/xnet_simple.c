@@ -33,6 +33,7 @@
 #ifdef USE_XNET_SIMPLE
 
 void *mds_gwg;
+struct xnet_prof g_xnet_prof;
 
 /* First, how do we handle the site_id to ip address translation?
  */
@@ -80,13 +81,15 @@ void setnodelay(int fd)
     }
 }
 
+#ifdef XNET_BLOCKING
+#define setnonblocking(fd)
+#else
 void setnonblocking(int fd)
 {
     int err;
 
     /* NOTE that: we found that the NONBLOCK Interface is not very good for
      * our test case */
-    return;
     err = fcntl(fd, F_GETFL);
     if (err < 0) {
         hvfs_err(xnet, "fcntl() GET failed %d\n", errno);
@@ -100,7 +103,11 @@ void setnonblocking(int fd)
 out:
     return;
 }
+#endif
 
+#ifdef XNET_BLOCKING
+#define unsetnonblocking(fd)
+#else
 void unsetnonblocking(int fd)
 {
     int err;
@@ -118,6 +125,7 @@ void unsetnonblocking(int fd)
 out:
     return;
 }
+#endif
 
 static inline
 struct xnet_context *__find_xc(u64 site_id)
@@ -191,10 +199,14 @@ int __xnet_handle_tx(int fd)
         }
         br += bt;
     } while (br < sizeof(struct xnet_msg_tx));
+    atomic64_add(br, &g_xnet_prof.inbytes);
 
     hvfs_debug(xnet, "We have recieved the MSG_TX, dpayload %lld\n", msg->tx.len);
 
     /* receive the data if exists */
+#ifdef XNET_EAGER_WRITEV
+    msg->tx.len -= sizeof(struct xnet_msg_tx);
+#endif
     if (msg->tx.len) {
         /* we should pre-alloc the buffer */
         void *buf = xmalloc(msg->tx.len);
@@ -225,6 +237,7 @@ int __xnet_handle_tx(int fd)
 
         /* add the data to the riov */
         xnet_msg_add_rdata(msg, buf, br);
+        atomic64_add(br, &g_xnet_prof.inbytes);
     }
     
     /* find the related msg */
@@ -274,9 +287,12 @@ int __xnet_handle_tx(int fd)
     lib_timer_echo_plus(&begin, &end, 1, "Total Handle Time");
 #endif
 
+    if (next < 0) {
+        xnet_free_msg(msg);
+    }
     return next;
 out_free:
-    xfree(msg);
+    xnet_free_msg(msg);
     return next;
 }
 
@@ -309,7 +325,7 @@ void *pollin_thread_main(void *arg)
     for (; !pollin_thread_stop;) {
         nfds = epoll_wait(epfd, events, 10, 50);
         if (nfds == -1) {
-            hvfs_err(xnet, "epoll_wait() failed %d\n", errno);
+            hvfs_debug(xnet, "epoll_wait() failed %d\n", errno);
             continue;
         }
         for (i = 0; i < nfds; i++) {
@@ -360,8 +376,8 @@ void *pollin_thread_main(void *arg)
                     next = __xnet_handle_tx(events[i].data.fd);
                     if (next < 0) {
                         /* this means the connection is shutdown */
-                        hvfs_debug(xnet, "connection %d is shutdown.\n",
-                                   events[i].data.fd);
+                        hvfs_err(xnet, "connection %d is shutdown.\n",
+                                 events[i].data.fd);
                         epoll_ctl(epfd, EPOLL_CTL_DEL, events[i].data.fd, &ev);
                         st_clean_sockfd(&gst, events[i].data.fd);
                         break;
@@ -379,6 +395,10 @@ out:
 int st_init(void)
 {
     memset(&gst, 0, sizeof(gst));
+    atomic64_set(&g_xnet_prof.msg_alloc, 0);
+    atomic64_set(&g_xnet_prof.msg_free, 0);
+    atomic64_set(&g_xnet_prof.inbytes, 0);
+    atomic64_set(&g_xnet_prof.outbytes, 0);
     
     return 0;
 }
@@ -732,6 +752,7 @@ retry:
                "site %lld -> %lld ...\n", xa->sockfd, 
                msg->tx.ssite_id, msg->tx.dsite_id);
     
+#ifndef XNET_EAGER_WRITEV
     /* send the msg tx by the selected connection */
     bw = 0;
     do {
@@ -746,6 +767,8 @@ retry:
         }
         bw += bt;
     } while (bw < sizeof(struct xnet_msg_tx));
+    atomic64_add(bw, &g_xnet_prof.outbytes);
+#endif
 
     /* then, send the data region */
     if (msg->siov_ulen) {
@@ -753,13 +776,15 @@ retry:
                    msg->siov_ulen, msg->tx.len);
         int i;
         
-#ifdef XNET_BLOCKING
+#if 1
         bt = writev(xa->sockfd, msg->siov, msg->siov_ulen);
-        if (bt < 0) {
-            hvfs_err(xnet, "writev() err %d\n", errno);
+        if (bt < 0 || msg->tx.len > bt) {
+            hvfs_err(xnet, "writev() err %d, for now we do not support redo:(\n", 
+                     errno);
             err = -errno;
             goto out;
         }
+        atomic64_add(bt, &g_xnet_prof.outbytes);
 #else        
         for (i = 0; i < msg->siov_ulen; i++) {
             bw = 0;
@@ -775,6 +800,7 @@ retry:
                 }
                 bw += bt;
             } while (bw < msg->siov[i].iov_len);
+            atomic64_add(bw, &g_xnet_prof.outbytes);
         }
 #endif
     }
@@ -848,6 +874,10 @@ void xnet_msg_free_sdata(struct xnet_msg *msg)
         return;
     }
     for (i = 0; i < msg->siov_ulen; i++) {
+#ifdef XNET_EAGER_WRITEV
+        if (!i)
+            continue;
+#endif
         ASSERT(msg->siov[i].iov_base, xnet);
         xfree(msg->siov[i].iov_base);
     }

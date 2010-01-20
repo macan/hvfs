@@ -267,7 +267,7 @@ int mds_init(int bdepth)
     hmo.conf.max_async_unlink = 1024;
     hmo.conf.unlink_interval = 2;
     hmo.conf.txc_hash_size = 1024;
-    hmo.conf.txc_ftx = 0;
+    hmo.conf.txc_ftx = 1;
     hmo.conf.cbht_bucket_depth = bdepth;
 
     /* Init the signal handlers */

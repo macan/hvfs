@@ -54,6 +54,7 @@ struct hvfs_txc
     struct list_head lru;       /* only for commited TX */
     xlock_t lock;               /* protect lru list */
     int hsize;                  /* hash table size */
+    atomic_t total;             /* total TXs right now */
     atomic_t ftx;               /* free TXs */
 };
 

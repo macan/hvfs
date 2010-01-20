@@ -48,12 +48,18 @@ struct xnet_msg *xnet_alloc_msg(u8 alloc_flag)
 
 #ifdef USE_XNET_SIMPLE
     sem_init(&msg->event, 0, 0);
+    if (msg)
+        atomic64_inc(&g_xnet_prof.msg_alloc);
 #endif
+
     return msg;
 }
 
 void xnet_free_msg(struct xnet_msg *msg)
 {
+    if (!msg)
+        return;
+    
     /* FIXME: we should check the alloc_flag and auto free flag */
     if (msg->pair)
         xnet_free_msg(msg->pair);
@@ -69,6 +75,9 @@ void xnet_free_msg(struct xnet_msg *msg)
         }
     }
     xfree(msg);
+#ifdef USE_XNET_SIMPLE
+    atomic64_inc(&g_xnet_prof.msg_free);
+#endif
 }
 
 #ifndef USE_XNET_SIMPLE

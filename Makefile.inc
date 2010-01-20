@@ -29,7 +29,8 @@ CFLAGS += -Wall -DCDATE="\"$(COMPILE_DATE)\"" \
 			-DCHOST="\"$(COMPILE_HOST)\"" -I$(INC_PATH) \
 			-I$(LIB_PATH) -I$(MDS) -D_GNU_SOURCE\
 			-DHVFS_TRACING -DHVFS_DEBUG_MEMORY -DHVFS_DEBUG_LOCK_ \
-            -D_USE_SPINLOCK_ -DHVFS_DEBUG_LATENCY_ -DXNET_BLOCKING
+            -D_USE_SPINLOCK_ -DHVFS_DEBUG_LATENCY_ -DXNET_BLOCKING \
+            -DXNET_EAGER_WRITEV_
 LFLAGS += -lrt -lpthread
 
 # Region for depend files
@@ -41,7 +42,8 @@ LIB_AR_SOURCE = lib.c ring.c hash.c time.c bitmap.c xlock.c
 XNET_AR_SOURCE = xnet.c xnet_simple.c
 INC_H_SOURCE = atomic.h err.h hvfs.h hvfs_common.h hvfs_const.h hvfs_k.h \
 				hvfs_u.h ite.h mds_api.h mdsl_api.h memory.h site.h tx.h \
-				tracing.h txg.h xhash.h xlist.h xlock.h xnet.h xtable.h
+				tracing.h txg.h xhash.h xlist.h xlock.h xnet.h xtable.h \
+                xprof.h
 MDS_H_SOURCE = mds.h cbht.h dh.h itb.h prof.h
 LIB_H_SOURCE = lib.h ring.h
 

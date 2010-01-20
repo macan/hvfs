@@ -126,6 +126,9 @@ int get_send_msg_create(int dsite, int nid, u64 puuid, u64 itbid, u64 flag,
     xnet_msg_fill_tx(msg, XNET_MSG_REQ, XNET_NEED_DATA_FREE |
                      XNET_NEED_REPLY, hmo.xc->site_id, dsite);
     xnet_msg_fill_cmd(msg, HVFS_CLT2MDS_CREATE, 0, 0);
+#ifdef XNET_EAGER_WRITEV
+    xnet_msg_add_sdata(msg, &msg->tx, sizeof(struct xnet_msg_tx));
+#endif
     xnet_msg_add_sdata(msg, hi, dpayload);
 
     hvfs_debug(xnet, "MDS dpayload %lld (namelen %d, dlen %lld)\n", 
@@ -222,6 +225,9 @@ int get_send_msg_unlink(int dsite, int nid, u64 puuid, u64 itbid, u64 flag)
     xnet_msg_fill_tx(msg, XNET_MSG_REQ, XNET_NEED_DATA_FREE |
                      XNET_NEED_REPLY, hmo.xc->site_id, dsite);
     xnet_msg_fill_cmd(msg, HVFS_CLT2MDS_UNLINK, 0, 0);
+#ifdef XNET_EAGER_WRITEV
+    xnet_msg_add_sdata(msg, &msg->tx, sizeof(struct xnet_msg_tx));
+#endif
     xnet_msg_add_sdata(msg, hi, dpayload);
 
     hvfs_debug(xnet, "MDS dpayload %lld (namelen %d, dlen %lld)\n",
@@ -319,6 +325,9 @@ int get_send_msg_lookup(int dsite, int nid, u64 puuid, u64 itbid, u64 flag)
     xnet_msg_fill_tx(msg, XNET_MSG_REQ, XNET_NEED_DATA_FREE |
                      XNET_NEED_REPLY, hmo.xc->site_id, dsite);
     xnet_msg_fill_cmd(msg, HVFS_CLT2MDS_LOOKUP, 0, 0);
+#ifdef XNET_EAGER_WRITEV
+    xnet_msg_add_sdata(msg, &msg->tx, sizeof(struct xnet_msg_tx));
+#endif
     xnet_msg_add_sdata(msg, hi, dpayload);
 
     hvfs_debug(xnet, "MSG dpayload %lld (namelen %d, dlen %lld)\n", 
@@ -417,7 +426,7 @@ int msg_send(int dsite, int loop)
             itbid++;
             j = 0;
         }
-        err = get_send_msg_unlink(dsite, j++, puuid, itbid, 
+        err = get_send_msg_unlink(dsite, j++, puuid, itbid,
                                   INDEX_UNLINK | INDEX_BY_NAME | INDEX_ITE_ACTIVE);
         if (err) {
             hvfs_err(xnet, "unlink 'mds-xnet-test-%lld-%lld-%d' failed\n",
@@ -468,6 +477,7 @@ int main(int argc, char *argv[])
 
     st_init();
     mds_init(10);
+    hmo.prof.xnet = &g_xnet_prof;
 
     hmo.xc = xnet_register_type(0, port, self, &ops);
     if (IS_ERR(hmo.xc)) {
@@ -482,7 +492,7 @@ int main(int argc, char *argv[])
 //    SET_TRACING_FLAG(mds, HVFS_DEBUG);
 
     if (HVFS_IS_CLIENT(self))
-        msg_send(dsite, 20000);
+        msg_send(dsite, 50000);
     else
         msg_wait(dsite);
 

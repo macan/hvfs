@@ -54,6 +54,9 @@ void mds_send_reply(struct hvfs_tx *tx, struct hvfs_md_reply *hmr,
                err, tx->reqin_site, hmr->len, hmr->flag);
     hmr->err = err;
     if (!hmr->err) {
+#ifdef XNET_EAGER_WRITEV
+        xnet_msg_add_sdata(tx->rpy, &tx->rpy->tx, sizeof(struct xnet_msg_tx));
+#endif
         xnet_msg_add_sdata(tx->rpy, hmr, sizeof(*hmr));
         if (hmr->len)
             xnet_msg_add_sdata(tx->rpy, hmr->data, hmr->len);
@@ -74,8 +77,6 @@ void mds_send_reply(struct hvfs_tx *tx, struct hvfs_md_reply *hmr,
     /* match the original request at the source site */
     tx->rpy->tx.handle = tx->req->tx.handle;
 
-    mds_tx_done(tx);
-
     xnet_wait_group_add(mds_gwg, tx->rpy);
     if (xnet_isend(hmo.xc, tx->rpy)) {
         hvfs_err(mds, "xnet_isend() failed\n");
@@ -84,6 +85,7 @@ void mds_send_reply(struct hvfs_tx *tx, struct hvfs_md_reply *hmr,
         /* FIXME: should we free the tx->rpy? */
     }
     /* FIXME: state machine of TX, MSG */
+    mds_tx_done(tx);
     mds_tx_reply(tx);
 #ifdef HVFS_DEBUG_LATENCY
     lib_timer_stop(&end);
@@ -113,6 +115,9 @@ void mds_statfs(struct hvfs_tx *tx)
         return;
     }
     
+#ifdef XNET_EAGER_WRITEV
+    xnet_msg_add_sdata(tx->rpy, &tx->rpy->tx, sizeof(struct xnet_msg_tx));
+#endif
     xnet_msg_add_sdata(tx->rpy, s, sizeof(struct statfs));
 
     xnet_msg_fill_tx(tx->rpy, XNET_MSG_RPY, XNET_NEED_DATA_FREE, hmo.site_id,

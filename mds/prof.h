@@ -105,6 +105,7 @@ struct mds_prof
     struct mds_txg_prof txg;
     struct mds_cbht_prof cbht;
     struct mds_itb_prof itb;
+    struct xnet_prof *xnet;
 };
 
 #define mds_cbht_prof_rw(hi) do {                   \

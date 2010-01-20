@@ -96,12 +96,13 @@ struct itb *mds_read_itb(u64 puuid, u64 psalt, u64 itbid)
     if (IS_ERR(p)) {
         hvfs_debug(mds, "ring_get_point() failed with %ld\n", PTR_ERR(p));
         i = ERR_PTR(-ECHP);
-        goto out;
+        goto out_free;
     }
     /* prepare the msg */
-    xnet_msg_set_site(msg, p->site_id);
-    xnet_msg_add_sdata(msg, &si, sizeof(si));
+    xnet_msg_fill_tx(msg, XNET_MSG_REQ, XNET_NEED_DATA_FREE |
+                     XNET_NEED_REPLY, hmo.xc->site_id, p->site_id);
     xnet_msg_fill_cmd(msg, HVFS_MDS2MDSL_ITB, 0, 0);
+    xnet_msg_add_sdata(msg, &si, sizeof(si));
     
     ret = xnet_send(hmo.xc, msg);
     if (ret) {
@@ -120,7 +121,6 @@ struct itb *mds_read_itb(u64 puuid, u64 psalt, u64 itbid)
 
 out_free:
     xnet_free_msg(msg);
-out:
     return i;
 }
 

@@ -50,5 +50,12 @@ void dump_profiling(time_t t)
     hvfs_info(mds, "|  ITB Prof: cowed %ld, async_unlink %ld\n",
               atomic64_read(&hmo.prof.itb.cowed),
               atomic64_read(&hmo.prof.itb.async_unlink));
-    hvfs_info(mds, "-- ITC Prof: ftx %d\n", atomic_read(&hmo.txc.ftx));
+    hvfs_info(mds, "|  XNET Prof: alloc %ld, free %ld, inb %ld, outb %ld\n",
+              atomic64_read(&hmo.prof.xnet->msg_alloc),
+              atomic64_read(&hmo.prof.xnet->msg_free),
+              atomic64_read(&hmo.prof.xnet->inbytes),
+              atomic64_read(&hmo.prof.xnet->outbytes));
+    hvfs_info(mds, "-- ITC Prof: ftx %d, total %d\n", 
+              atomic_read(&hmo.txc.ftx),
+              atomic_read(&hmo.txc.total));
 }

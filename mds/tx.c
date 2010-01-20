@@ -91,6 +91,7 @@ struct hvfs_tx *mds_alloc_tx(u16 op, struct xnet_msg *req)
         hvfs_debug(mds, "zalloc() hvfs_tx failed\n");
         return NULL;
     }
+    atomic_inc(&hmo.txc.total);
     
 init_tx:
     tx->op = op;
@@ -205,6 +206,7 @@ int mds_init_txc(struct hvfs_txc *txc, int hsize, int ftx)
     }
 
     txc->hsize = hsize;
+    atomic_set(&txc->total, ftx);
     atomic_set(&txc->ftx, ftx);
 out:
     return err;
@@ -343,6 +345,7 @@ void __tx_send_commit_msg(struct hvfs_tx *tx)
         /* do not retry myself, client is forced to retry */
         xnet_wait_group_del(mds_gwg, msg);
     }
+    /* NOTE: if using XNET_SIMPLE, we need to free the msg here */
 }
 
 /*

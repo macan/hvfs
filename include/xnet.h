@@ -105,8 +105,8 @@ struct xnet_context
     int pt_num;
     int service_port;
     struct xnet_type_ops ops;
+    u64 site_id;                /* local site id */
 #ifdef USE_XNET_SIMPLE
-    u64 site_id;
     sem_t wait;
     struct list_head list;
 #endif
@@ -189,6 +189,9 @@ void st_destroy(void);
 int xnet_update_ipaddr(u64, int, char *ipaddr[], short port[]);
 void xnet_wait_any(struct xnet_context *xc);
 #endif
+
+/* Profiling Section */
+extern struct xnet_prof g_xnet_prof;
 
 /* This section for XNET reply msg  */
 #define XNET_RPY_ACK            0x01
